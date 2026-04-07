@@ -1,0 +1,18 @@
+{
+  "task_id": "qa-answerer",
+  "type": "agent",
+  "description": "Answer a memory question with CoT reasoning, returning structured cot + final_answer",
+  "model": "gpt-4.1-mini",
+  "temperature": 0.3,
+  "max_tokens": 1024,
+  "schema": "schema.py",
+  "parameters": {
+    "context":  {"required": true,  "default": ""},
+    "question": {"required": true,  "default": ""}
+  },
+  "prompts": [
+    {"template": "system.md"},
+    {"template": "context.md"}
+  ],
+  "timeout": 60
+}

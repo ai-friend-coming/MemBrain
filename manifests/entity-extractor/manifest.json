@@ -1,0 +1,31 @@
+{
+  "task_id": "entity-extractor",
+  "type": "agent",
+  "description": "Extracts a deduplicated list of entity reference names from chat messages",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "schema": "schema.py",
+  "parameters": {
+    "entity_context": {
+      "required": false,
+      "default": ""
+    },
+    "context_messages": {
+      "required": false,
+      "default": ""
+    },
+    "messages_json": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

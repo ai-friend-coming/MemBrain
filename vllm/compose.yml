@@ -1,0 +1,32 @@
+services:
+  vllm-embedding:
+    image: vllm/vllm-openai:v0.11.1
+    container_name: vllm-embedding
+    restart: "no"
+    shm_size: 8g
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ports:
+      - "9113:9113"
+    volumes:
+      - /path/to/models/Qwen3-Embedding-4B:/Qwen3-Embedding-4B
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    command: >
+      --model /Qwen3-Embedding-4B
+      --served-model-name qwen3-embed
+      --runner pooling
+      --convert embed
+      --dtype bfloat16
+      --max-model-len 4096
+      --port 9113
+      --gpu-memory-utilization 0.90
+      --max-num-batched-tokens 8192
+      --max-num-seqs 512
+      --trust-remote-code

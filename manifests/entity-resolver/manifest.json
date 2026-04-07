@@ -1,0 +1,27 @@
+{
+  "task_id": "entity-resolver",
+  "type": "agent",
+  "description": "Resolves new entities against existing ones using short numeric IDs",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "schema": "schema.py",
+  "parameters": {
+    "new_entities_json": {
+      "required": true,
+      "default": ""
+    },
+    "existing_entities_json": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

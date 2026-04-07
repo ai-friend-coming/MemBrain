@@ -1,0 +1,26 @@
+{
+  "task_id": "session-summarizer",
+  "type": "agent",
+  "description": "Generates a compressed telegram-style episode summary from a peer conversation session (LoCoMo-optimised)",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "parameters": {
+    "conversation_start_time": {
+      "required": true,
+      "default": ""
+    },
+    "conversation": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

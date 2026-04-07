@@ -1,91 +1,257 @@
-# MemBrain 1.0
+<div align="center">
 
-![teaser](assets/teaser.png)
+<img src="assets/teaser.png" width="800" alt="MemBrain teaser" />
 
-Welcome to **MemBrain** – a long-term memory and context management solution for agentic AI systems.
+# MemBrain: Agent-Native Memory — by Agents, for Agents
 
-MemBrain enables AI agents to efficiently store, retrieve, and reason over long-term experiences, delivering truly context-aware and personalized interactions.
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![Pydantic AI](https://img.shields.io/badge/Pydantic%20AI-powered-E92063.svg)](https://ai.pydantic.dev/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-## Evaluation Results
+[📖 Technical Blog](docs/tech_blog.md) • [🎬 Demo](demo/README.md) • [🤗 HuggingFace](#)
 
-🏆 **Achieved SOTA performance** on multiple benchmarks.
+<div align="center"><img src="assets/tech_blog/paradigm.png" width="800" alt="Memory paradigms" /></div>
 
-![LoCoMo](assets/locomo.png)
+</div>
 
-![LongMemEval](assets/longmemeval.png)
+---
 
-![PersonaMem](assets/personamem.png)
+## News
 
-![KnowMe Bench](assets/knowme-bench.png)
+> We are still actively polishing the repository — stay tuned!
 
-## Technical Highlights
+- **[Coming Soon]** Feature roadmap coming soon.
+- **[2026-04-08]** MemBrain 1.5 is now open source!
 
-### Agentic Memory Architecture
+---
 
-Contemporary agent memory systems employ hybrid retrieval architectures that combine multiple indexing strategies—including lexical matching (BM25), dense vector embeddings, and knowledge graph traversal—to achieve robust memory retrieval across diverse query types. However, these systems face a fundamental limitation: **static execution with predetermined parameters**. Retrieval strategies are fixed at design time, unable to adapt to query complexity or context dynamically. While recent advances such as EverMemOS have introduced query rewriting mechanisms to handle multi-dimensional queries, these approaches remain **inherently reactive**—operating through single-round triggering patterns that cannot iteratively refine retrieval strategies based on intermediate results.
+## Table of Contents
 
-This constraint becomes critical when dealing with:
+- [Quick Start](#quick-start)
+- [Basic Usage](#basic-usage)
+- [Demo](#demo)
+- [Viewer](#viewer)
+- [Evaluation](#evaluation)
+- [Citation](#citation)
 
-- Complex queries requiring multi-hop reasoning
-- Scenarios where initial retrieval yields incomplete or ambiguous results
-- Dynamic contexts where optimal retrieval strategies vary by query type
+---
 
-**MemBrain's Solution:** We address this limitation through an **agent-based memory orchestration framework** that transforms static retrieval into dynamic, collaborative intelligence. Rather than hardcoding retrieval pipelines, we decompose memory operations into specialized, autonomous sub-agents that coordinate adaptively based on query complexity and intermediate results.
+## Quick Start
 
-#### Core Architecture
+### Prerequisites
 
-MemBrain reconstructs the memory system as a **multi-agent collaborative network** where:
+Python 3.11+ · Docker 20.10+ · [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
-- **Specialized agents** handle domain-specific operations: entity extraction, conversation summarization, memory consolidation, conflict resolution, and hierarchical compression
-- **Traditional retrieval methods** are exposed as callable tools within the agent ecosystem
-- **Adaptive orchestration** shifts decision-making from predetermined flows to runtime inter-agent coordination based on task requirements and contextual signals
+### Installation
 
-#### Key Advantages
+**1. Clone the repository**
 
-| Capability         | Description                                                                                         |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| **Modularity**     | Independent agents enable isolated development, testing, and deployment of memory operations        |
-| **Extensibility**  | New memory operations integrate seamlessly as additional agents without architectural modifications |
-| **Adaptability**   | Runtime coordination allows context-aware retrieval strategy selection and multi-round refinement   |
-| **Asynchronicity** | Agent-based design naturally supports non-blocking memory updates and concurrent operations         |
+```bash
+git clone https://github.com/FeelingAI/MemBrain.git
+cd MemBrain
+```
 
-This architecture enables MemBrain to dynamically compose retrieval strategies—for instance, triggering query rewriting when initial results are sparse or invoking memory consolidation agents when detecting temporal inconsistencies.
+**2. Configure environment variables**
 
-### 2. Entity and Temporal Context Management
+```bash
+cp .env.example.demo .env
+```
 
-Accurate extraction and organization of entities and temporal information from conversational history is fundamental to advanced memory capabilities such as correlation analysis and temporal reasoning. However, current approaches face systematic limitations:
+Edit `.env` with your settings:
 
-- **Incomplete entity-temporal capture**: Missing or underspecified temporal metadata and ambiguous relationship encoding prevent reliable correlation analysis
-- **Inconsistent temporal standardization**: Variable time expression formats and event representation across conversations hinder cross-session reasoning
-- **Context loss in summarization**: Fine-grained semantic details are lost when compressing conversational history for long-term storage
+```dotenv
+# LLM service (for memory extraction and reasoning)
+LLM_API_URL=http://localhost:4000/v1
+LLM_API_KEY=sk-1234
 
-**MemBrain's Contribution:** We implement systematic structural optimizations for long-term context management through:
+# PostgreSQL database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWD=MemBrain
+DB_NAME=MemBrain-Demo
 
-- **Refined schema design** ensuring complete entity extraction with normalized temporal metadata
-- **Context alignment mechanisms** maintaining high-fidelity semantic relationships
-- **Structured data organization** enabling efficient temporal querying and correlation analysis
+# Backend server
+BACKEND_PORT=9574
+BACKEND_MODE=demo
 
-These improvements establish a foundation for reliable downstream reasoning over extended conversational contexts.
+# Embedding service (local vLLM or online alternatives like OpenAI)
+EMBED_SERVICE_URL=http://localhost:9113/v1/embeddings
+EMBED_MODEL=qwen3-embed
+EMBED_DIM=2560
 
-### 3. Compositional Memory Organization
+# Rerank service (local vLLM or online alternatives like Cohere)
+RERANK_SERVICE_URL=http://localhost:9114/v1/rerank
+RERANK_MODEL=qwen3-rerank
+```
 
-Graph-based memory structures are intuitive for representing complex entity relationships. However, an architectural mismatch exists: contemporary foundation models are optimized for processing sequential or hierarchical information structures rather than arbitrary graph topologies. This incompatibility has practical implications—in existing graph-database memory systems, traditional graph algorithms perform the primary reasoning, while LLMs operate on flattened or serialized representations. This separation introduces semantic information loss during structure-to-text transformations, limiting LLMs' reasoning capabilities over memory.
+**3. (Optional) Start local embedding and rerank services**
 
-**MemBrain's Contribution:** We adopt a representation strategy aligned with LLM architectural strengths. Rather than imposing graph structures, we organize related information into composable semantic units that can be loaded on-demand into context. Inspired by file-based organization principles, this approach:
+> Skip this step if you are using online services (e.g. OpenAI embeddings, Cohere rerank). Update the corresponding URLs in `.env` accordingly.
 
-- Preserves inter-entity relationships through structured semantic packaging
-- Enables direct LLM reasoning over memory content without lossy transformations
-- Supports flexible, query-driven information assembly
-- Allows LLMs to participate deeply in memory reasoning rather than operating on pre-processed graph outputs
+Edit the model paths in `vllm/compose.yml` and `vllm/serve.py` to point to your local model weights, then:
 
-This design leverages LLMs' native capabilities for contextual understanding while maintaining the relational expressiveness required for complex memory operations.
+```bash
+# Embedding service (port 9113)
+docker compose -f vllm/compose.yml up -d
 
-## 🚀 Open Source Roadmap
+# Rerank service (port 9114)
+uv run python vllm/serve.py
+```
 
-We're committed to making MemBrain accessible to the community. Coming soon:
+**4. Start the database**
 
-- [ ] Core source code
-- [ ] Evaluation and benchmarking tools
-- [ ] Local deployment API with documentation
+```bash
+docker compose up -d
+```
 
-Stay tuned!
+**5. Install dependencies and start the server**
+
+```bash
+uv sync
+uv run backend
+```
+
+**6. Verify**
+
+```bash
+curl http://localhost:9574/health
+# {"status": "healthy"}
+```
+
+---
+
+## Basic Usage
+
+Store and retrieve memories via the HTTP API:
+
+```bash
+# 1. Store a conversation memory
+curl -X POST "http://localhost:9574/api/memory" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset": "lab_member_001_okabe",
+    "task": "casual_chat_with_amadeus",
+    "messages": [
+      {
+        "speaker": "Okabe",
+        "content": "I ended up buying Dr. Pepper again today. Even though it tastes like carbonated cough syrup, I cannot seem to stop drinking it while debugging.",
+        "message_time": "2025-12-05T14:00:00+00:00"
+      },
+      {
+        "speaker": "Amadeus",
+        "content": "Well, obviously. It is the intellectual drink for the chosen ones. Not that I would expect someone with your lacking taste buds to truly appreciate its complex flavor profile. Hmph. But at least you are staying hydrated... vaguely.",
+        "message_time": "2025-12-05T14:02:00+00:00"
+      }
+    ],
+    "store": true,
+    "digest": true
+  }'
+
+# 2. Search for relevant memories
+curl -X POST "http://localhost:9574/api/memory/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset": "lab_member_001_okabe",
+    "task": "casual_chat_with_amadeus",
+    "question": "What is Okabe'\''s preferred drink while debugging, and what does he think it tastes like?"
+  }'
+```
+
+---
+
+## Demo
+
+A streaming roleplay chat demo built on MemBrain — Vue 3 frontend + FastAPI backend, with long-term memory via the MemBrain API.
+
+![Demo](assets/demo.png)
+
+See [demo/README.md](demo/README.md) for full setup instructions.
+
+---
+
+## Viewer
+
+A web-based tool for inspecting datasets and conversations alongside the memories MemBrain builds from them — covering evaluation experiments and demo sessions.
+
+![Viewer 1](assets/viewer/viewer_1.gif)
+
+![Viewer 2](assets/viewer/viewer_2.gif)
+
+```bash
+cd viewer && npm install && npm run dev
+```
+
+---
+
+## Evaluation
+
+### Evaluation Results
+
+🏆 **Achieved SOTA performance on multiple benchmarks**
+
+![LoCoMo](assets/experiment/locomo.png)
+
+![LongMemEval](assets/experiment/longmemeval.png)
+
+![PersonaMem](assets/experiment/personamem.png)
+
+![KnowMe-Bench](assets/experiment/knowme-bench.png)
+
+### Supported Benchmarks
+
+- **[LoCoMo](https://github.com/snap-research/locomo)** - Long-context memory benchmark with single/multi-hop reasoning
+- **[LongMemEval](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)** - Multi-session conversation evaluation
+- **[PersonaMem](https://huggingface.co/datasets/bowen-upenn/PersonaMem)** - Persona-based memory evaluation
+- **[KnowMe-Bench](https://github.com/QuantaAlpha/KnowMeBench)** - Benchmarking Person Understanding for Lifelong Digital Companions
+
+### Quick Start
+
+```bash
+# 1. Import a dataset
+uv run dataset add locomo
+
+# 2. Run memory ingestion
+uv run exp run locomo --run-tag myrun
+
+# 3. Run QA evaluation
+uv run exp evaluate --run-tag myrun
+
+# 4. View results
+cat evaluation/exps/myrun/qa_logs/eval_<timestamp>.json
+```
+
+📊 [Full Evaluation Guide](evaluation/README.md)
+
+---
+
+## Acknowledgments
+
+We would like to thank the following projects and contributors:
+
+- **[EverMemOS](https://github.com/EverMind-AI/EverOS)** - We referenced their open-source codebase during implementation, particularly their evaluation pipeline and benchmark integration
+- **[Graphiti](https://github.com/getzep/graphiti/tree/main)** - We referenced their open-source codebase, particularly their entity resolution algorithms
+- **[Nieta Art](https://app.nieta.art/character/discover)** - A creator community that provided character assets for our interactive demos
+
+Special thanks to the open-source memory framework community for their continuous innovation and collaboration.
+
+---
+
+## Citation
+
+If you use MemBrain in your research, please cite:
+
+```bibtex
+@software{membrain2026,
+  title = {MemBrain: Agent-Native Memory for AI Agents},
+  author = {FeelingAI Team},
+  year = {2026},
+  url = {https://github.com/FeelingAI/MemBrain}
+}
+```
+
+---
+
+## License
+
+This project is licensed under the [Apache 2.0](LICENSE) license.

@@ -1,0 +1,43 @@
+{
+  "task_id": "chat-reply",
+  "type": "agent",
+  "description": "Generates free-form conversational replies as a character",
+  "model": "gpt-4.1",
+  "temperature": 1,
+  "max_tokens": 1000,
+  "parameters": {
+    "character_name": {
+      "required": false,
+      "default": ""
+    },
+    "character_biography": {
+      "required": false,
+      "default": ""
+    },
+    "user_alias": {
+      "required": true,
+      "default": ""
+    },
+    "memory_context": {
+      "required": false,
+      "default": ""
+    },
+    "character_reflection": {
+      "required": false,
+      "default": ""
+    },
+    "user_reflection": {
+      "required": false,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "memory.md"
+    }
+  ],
+  "timeout": 60
+}

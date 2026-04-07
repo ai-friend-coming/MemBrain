@@ -1,0 +1,35 @@
+{
+  "task_id": "fact-generator",
+  "type": "agent",
+  "description": "Generates bracketed atomic facts from a fixed entity list and chat messages",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "schema": "schema.py",
+  "parameters": {
+    "entity_list_json": {
+      "required": true,
+      "default": ""
+    },
+    "entity_context": {
+      "required": false,
+      "default": ""
+    },
+    "context_messages": {
+      "required": false,
+      "default": ""
+    },
+    "messages_json": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

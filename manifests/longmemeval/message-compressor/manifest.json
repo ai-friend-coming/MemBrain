@@ -1,0 +1,17 @@
+{
+  "task_id": "message-compressor",
+  "type": "agent",
+  "description": "Pre-compress verbose messages before session summarization (LongMemEval)",
+  "model": "gpt-4.1-mini",
+  "temperature": 0.3,
+  "parameters": {
+    "context_message": {"required": false, "default": ""},
+    "target_message": {"required": true, "default": ""},
+    "target_speaker": {"required": true, "default": ""}
+  },
+  "prompts": [
+    {"template": "system.md"},
+    {"template": "context.md"}
+  ],
+  "timeout": 30
+}

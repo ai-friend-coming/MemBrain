@@ -1,0 +1,5 @@
+# Frontend build
+web-app/.vite/
+
+# Runtime Data
+data/

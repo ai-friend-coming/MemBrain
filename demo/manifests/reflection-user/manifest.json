@@ -1,0 +1,11 @@
+{
+  "task_id": "reflection-user",
+  "type": "agent",
+  "description": "Updates user portrait document from character perspective",
+  "model": "gpt-4.1",
+  "temperature": 0,
+  "max_tokens": 800,
+  "parameters": {},
+  "prompts": [{"template": "system.md"}],
+  "timeout": 30
+}

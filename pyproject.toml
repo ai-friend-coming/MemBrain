@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "membrain"
+version = "1.5.0"
+description = "MemBrain: Agent-Native Memory: by Agents, for Agents"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "python-dotenv>=1.0",
+    "fastapi[standard]>=0.115",
+    "uvicorn[standard]>=0.30",
+    "tqdm>=4.66",
+    "pydantic-ai>=0.1",
+    "pydantic-settings>=2.0",
+    "jinja2>=3.1",
+    "prometheus-client>=0.20",
+    "pgvector>=0.3",
+    "httpx>=0.28",
+    "uuid-utils>=0.9",
+    "tiktoken>=0.9",
+]
+
+[project.scripts]
+backend = "membrain.api.server:main"
+dataset = "evaluation.cli:dataset_main"
+exp     = "evaluation.cli:exp_main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["membrain", "evaluation"]
+
+[tool.ruff.lint]
+select = ["I"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+]

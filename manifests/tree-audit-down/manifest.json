@@ -1,0 +1,31 @@
+{
+  "task_id": "tree-audit-down",
+  "type": "agent",
+  "description": "Audits children organization within an entity tree node",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "schema": "schema.py",
+  "parameters": {
+    "node_description": {
+      "required": true,
+      "default": ""
+    },
+    "children_json": {
+      "required": true,
+      "default": ""
+    },
+    "split_mode": {
+      "required": false,
+      "default": "false"
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

@@ -1,0 +1,35 @@
+{
+  "task_id": "tree-audit-across",
+  "type": "agent",
+  "description": "Cross-boundary relocation of misplaced children via PROMOTE/RELOCATE",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "schema": "schema.py",
+  "parameters": {
+    "node_description": {
+      "required": true,
+      "default": ""
+    },
+    "children_json": {
+      "required": true,
+      "default": ""
+    },
+    "parent_description": {
+      "required": true,
+      "default": ""
+    },
+    "siblings_json": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

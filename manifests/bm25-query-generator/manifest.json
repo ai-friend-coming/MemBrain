@@ -1,0 +1,22 @@
+{
+  "task_id": "bm25-query-generator",
+  "type": "agent",
+  "description": "Generates a single Tantivy BM25 query string with mixed AND/OR semantics for fact and session retrieval",
+  "model": "gpt-4.1-mini",
+  "temperature": 0,
+  "parameters": {
+    "question": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 15
+}

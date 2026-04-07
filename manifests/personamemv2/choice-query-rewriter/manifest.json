@@ -1,0 +1,20 @@
+{
+  "task_id": "choice-query-rewriter",
+  "type": "agent",
+  "description": "Rewrite MCQ options into preference-targeted search queries",
+  "model": "gpt-4.1-mini",
+  "temperature": 0.0,
+  "schema": "schema.py",
+  "parameters": {
+    "question":  {"required": true,  "default": ""},
+    "choice_a":  {"required": true,  "default": ""},
+    "choice_b":  {"required": true,  "default": ""},
+    "choice_c":  {"required": true,  "default": ""},
+    "choice_d":  {"required": true,  "default": ""}
+  },
+  "prompts": [
+    {"template": "system.md"},
+    {"template": "context.md"}
+  ],
+  "timeout": 20
+}

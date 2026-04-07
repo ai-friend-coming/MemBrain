@@ -1,0 +1,16 @@
+{
+  "task_id": "memory-router",
+  "type": "agent",
+  "description": "Routes each turn to fast path (context sufficient) or deep path (long-term memory retrieval needed)",
+  "model": "gpt-4.1-mini",
+  "temperature": 0,
+  "max_tokens": 200,
+  "schema": "schema.py",
+  "parameters": {},
+  "prompts": [
+    {
+      "template": "system.md"
+    }
+  ],
+  "timeout": 15
+}

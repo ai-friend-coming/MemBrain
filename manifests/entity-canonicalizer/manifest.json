@@ -1,0 +1,23 @@
+{
+  "task_id": "entity-canonicalizer",
+  "type": "agent",
+  "description": "Selects best canonical name and merges descriptions for merge decisions",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "schema": "schema.py",
+  "parameters": {
+    "entities_json": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

@@ -1,0 +1,26 @@
+{
+  "task_id": "tree-summarizer",
+  "type": "agent",
+  "description": "Generates concise thematic summary for a tree node from its children",
+  "model": "gpt-4.1-mini",
+  "temperature": 1,
+  "parameters": {
+    "entity_ref": {
+      "required": true,
+      "default": ""
+    },
+    "children_descriptions_json": {
+      "required": true,
+      "default": ""
+    }
+  },
+  "prompts": [
+    {
+      "template": "system.md"
+    },
+    {
+      "template": "context.md"
+    }
+  ],
+  "timeout": 45
+}

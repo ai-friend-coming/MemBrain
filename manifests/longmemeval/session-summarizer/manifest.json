@@ -1,0 +1,16 @@
+{
+  "task_id": "session-summarizer",
+  "type": "agent",
+  "description": "User-message summariser for LongMemEval sessions",
+  "model": "gpt-4.1-mini",
+  "temperature": 0.4,
+  "parameters": {
+    "conversation": {"required": true, "default": ""},
+    "conversation_start_time": {"required": false, "default": ""}
+  },
+  "prompts": [
+    {"template": "system.md"},
+    {"template": "context.md"}
+  ],
+  "timeout": 45
+}
