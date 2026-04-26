@@ -43,7 +43,7 @@ The MemBrain backend runs in the **repository root directory** and requires Post
 
 ```bash
 # From the repository root directory
-cp .env.example.demo .env
+cp docs/env/demo.env.example .env
 ```
 
 Edit the newly created `.env` file, focusing on these key configurations:

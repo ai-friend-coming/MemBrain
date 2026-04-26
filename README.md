@@ -7,18 +7,10 @@ MemBrain 是一个面向 Agent / Chatbot 的长期记忆后端：写入多轮对
 核心依赖：
 
 - `FastAPI`：HTTP API。
-- `PostgreSQL / ParadeDB`：存储消息、事实、实体树、摘要和向量索引。
+- `ParadeDB`：存储消息、事实、实体树、摘要和向量索引。
 - LLM API：事实抽取、query 改写、多 query 扩展。
 - Embedding API：向量检索。
 - Rerank API：仅 `strategy="rerank"` 时需要。
-
-核心代码：
-
-- API 入口：`membrain/api/server.py`
-- 记忆接口：`membrain/api/routes/memory.py`
-- API schema：`membrain/api/schemas/memory.py`
-- 检索逻辑：`membrain/retrieval/application/retrieval.py`
-- demo 接入：`demo/src/services/membrain_client.py`
 
 ## 2. API 协议相关
 
@@ -145,7 +137,7 @@ task    = persona_<persona_id>
 ### 首次启动
 
 ```bash
-cp .env.example.deploy .env
+cp .env.example .env
 ```
 
 编辑 `.env`，至少确认：

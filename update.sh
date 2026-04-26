@@ -41,7 +41,7 @@ compose() {
 
 need_cmd docker
 docker compose version >/dev/null 2>&1 || die "docker compose plugin not available"
-[[ -f "$ENV_FILE" ]] || die "$ENV_FILE not found; copy .env.example.deploy to .env first"
+[[ -f "$ENV_FILE" ]] || die "$ENV_FILE not found; copy .env.example to .env first"
 
 MEMBRAIN_IMAGE="${MEMBRAIN_IMAGE:-$(read_env_value MEMBRAIN_IMAGE "$ENV_FILE")}"
 MEMBRAIN_IMAGE="${MEMBRAIN_IMAGE:-$DEFAULT_IMAGE}"
