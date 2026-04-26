@@ -1,257 +1,210 @@
-<div align="center">
+# MemBrain
 
-<img src="assets/teaser.png" width="800" alt="MemBrain teaser" />
+## 1. 库简单介绍
 
-# MemBrain: Agent-Native Memory — by Agents, for Agents
+MemBrain 是一个面向 Agent / Chatbot 的长期记忆后端：写入多轮对话，后台抽取事实、实体和会话摘要；查询时检索相关记忆，并返回可直接注入 prompt 的 `packed_context`。
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![Pydantic AI](https://img.shields.io/badge/Pydantic%20AI-powered-E92063.svg)](https://ai.pydantic.dev/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+核心依赖：
 
-[📖 Technical Blog](docs/tech_blog.md) • [🎬 Demo](demo/README.md) • [🤗 HuggingFace](#)
+- `FastAPI`：HTTP API。
+- `PostgreSQL / ParadeDB`：存储消息、事实、实体树、摘要和向量索引。
+- LLM API：事实抽取、query 改写、多 query 扩展。
+- Embedding API：向量检索。
+- Rerank API：仅 `strategy="rerank"` 时需要。
 
-<div align="center"><img src="assets/tech_blog/paradigm.png" width="800" alt="Memory paradigms" /></div>
+核心代码：
 
-</div>
+- API 入口：`membrain/api/server.py`
+- 记忆接口：`membrain/api/routes/memory.py`
+- API schema：`membrain/api/schemas/memory.py`
+- 检索逻辑：`membrain/retrieval/application/retrieval.py`
+- demo 接入：`demo/src/services/membrain_client.py`
 
----
+## 2. API 协议相关
 
-## News
+默认地址：
 
-> We are still actively polishing the repository — stay tuned!
-
-- **[Coming Soon]** Feature roadmap coming soon.
-- **[2026-04-08]** MemBrain 1.5 is now open source!
-
----
-
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Basic Usage](#basic-usage)
-- [Demo](#demo)
-- [Viewer](#viewer)
-- [Evaluation](#evaluation)
-- [Citation](#citation)
-
----
-
-## Quick Start
-
-### Prerequisites
-
-Python 3.11+ · Docker 20.10+ · [uv](https://docs.astral.sh/uv/getting-started/installation/)
-
-### Installation
-
-**1. Clone the repository**
-
-```bash
-git clone https://github.com/FeelingAI/MemBrain.git
-cd MemBrain
+```text
+http://localhost:9574
 ```
 
-**2. Configure environment variables**
+接口文档：
 
-```bash
-cp .env.example.demo .env
+```text
+GET /docs
+GET /openapi.json
 ```
 
-Edit `.env` with your settings:
+### 健康检查
 
-```dotenv
-# LLM service (for memory extraction and reasoning)
-LLM_API_URL=http://localhost:4000/v1
-LLM_API_KEY=sk-1234
-
-# PostgreSQL database
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWD=MemBrain
-DB_NAME=MemBrain-Demo
-
-# Backend server
-BACKEND_PORT=9574
-BACKEND_MODE=demo
-
-# Embedding service (local vLLM or online alternatives like OpenAI)
-EMBED_SERVICE_URL=http://localhost:9113/v1/embeddings
-EMBED_MODEL=qwen3-embed
-EMBED_DIM=2560
-
-# Rerank service (local vLLM or online alternatives like Cohere)
-RERANK_SERVICE_URL=http://localhost:9114/v1/rerank
-RERANK_MODEL=qwen3-rerank
+```http
+GET /health
 ```
 
-**3. (Optional) Start local embedding and rerank services**
-
-> Skip this step if you are using online services (e.g. OpenAI embeddings, Cohere rerank). Update the corresponding URLs in `.env` accordingly.
-
-Edit the model paths in `vllm/compose.yml` and `vllm/serve.py` to point to your local model weights, then:
-
-```bash
-# Embedding service (port 9113)
-docker compose -f vllm/compose.yml up -d
-
-# Rerank service (port 9114)
-uv run python vllm/serve.py
+```json
+{"status":"healthy"}
 ```
 
-**4. Start the database**
+### 写入记忆
 
-```bash
-docker compose up -d
+```http
+POST /api/memory
 ```
 
-**5. Install dependencies and start the server**
+最小请求：
 
-```bash
-uv sync
-uv run backend
-```
-
-**6. Verify**
-
-```bash
-curl http://localhost:9574/health
-# {"status": "healthy"}
-```
-
----
-
-## Basic Usage
-
-Store and retrieve memories via the HTTP API:
-
-```bash
-# 1. Store a conversation memory
-curl -X POST "http://localhost:9574/api/memory" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset": "lab_member_001_okabe",
-    "task": "casual_chat_with_amadeus",
-    "messages": [
-      {
-        "speaker": "Okabe",
-        "content": "I ended up buying Dr. Pepper again today. Even though it tastes like carbonated cough syrup, I cannot seem to stop drinking it while debugging.",
-        "message_time": "2025-12-05T14:00:00+00:00"
-      },
-      {
-        "speaker": "Amadeus",
-        "content": "Well, obviously. It is the intellectual drink for the chosen ones. Not that I would expect someone with your lacking taste buds to truly appreciate its complex flavor profile. Hmph. But at least you are staying hydrated... vaguely.",
-        "message_time": "2025-12-05T14:02:00+00:00"
-      }
-    ],
-    "store": true,
-    "digest": true
-  }'
-
-# 2. Search for relevant memories
-curl -X POST "http://localhost:9574/api/memory/search" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset": "lab_member_001_okabe",
-    "task": "casual_chat_with_amadeus",
-    "question": "What is Okabe'\''s preferred drink while debugging, and what does he think it tastes like?"
-  }'
-```
-
----
-
-## Demo
-
-A streaming roleplay chat demo built on MemBrain — Vue 3 frontend + FastAPI backend, with long-term memory via the MemBrain API.
-
-![Demo](assets/demo.png)
-
-See [demo/README.md](demo/README.md) for full setup instructions.
-
----
-
-## Viewer
-
-A web-based tool for inspecting datasets and conversations alongside the memories MemBrain builds from them — covering evaluation experiments and demo sessions.
-
-![Viewer 1](assets/viewer/viewer_1.gif)
-
-![Viewer 2](assets/viewer/viewer_2.gif)
-
-```bash
-cd viewer && npm install && npm run dev
-```
-
----
-
-## Evaluation
-
-### Evaluation Results
-
-🏆 **Achieved SOTA performance on multiple benchmarks**
-
-![LoCoMo](assets/experiment/locomo.png)
-
-![LongMemEval](assets/experiment/longmemeval.png)
-
-![PersonaMem](assets/experiment/personamem.png)
-
-![KnowMe-Bench](assets/experiment/knowme-bench.png)
-
-### Supported Benchmarks
-
-- **[LoCoMo](https://github.com/snap-research/locomo)** - Long-context memory benchmark with single/multi-hop reasoning
-- **[LongMemEval](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned)** - Multi-session conversation evaluation
-- **[PersonaMem](https://huggingface.co/datasets/bowen-upenn/PersonaMem)** - Persona-based memory evaluation
-- **[KnowMe-Bench](https://github.com/QuantaAlpha/KnowMeBench)** - Benchmarking Person Understanding for Lifelong Digital Companions
-
-### Quick Start
-
-```bash
-# 1. Import a dataset
-uv run dataset add locomo
-
-# 2. Run memory ingestion
-uv run exp run locomo --run-tag myrun
-
-# 3. Run QA evaluation
-uv run exp evaluate --run-tag myrun
-
-# 4. View results
-cat evaluation/exps/myrun/qa_logs/eval_<timestamp>.json
-```
-
-📊 [Full Evaluation Guide](evaluation/README.md)
-
----
-
-## Acknowledgments
-
-We would like to thank the following projects and contributors:
-
-- **[EverMemOS](https://github.com/EverMind-AI/EverOS)** - We referenced their open-source codebase during implementation, particularly their evaluation pipeline and benchmark integration
-- **[Graphiti](https://github.com/getzep/graphiti/tree/main)** - We referenced their open-source codebase, particularly their entity resolution algorithms
-- **[Nieta Art](https://app.nieta.art/character/discover)** - A creator community that provided character assets for our interactive demos
-
-Special thanks to the open-source memory framework community for their continuous innovation and collaboration.
-
----
-
-## Citation
-
-If you use MemBrain in your research, please cite:
-
-```bibtex
-@software{membrain2026,
-  title = {MemBrain: Agent-Native Memory for AI Agents},
-  author = {FeelingAI Team},
-  year = {2026},
-  url = {https://github.com/FeelingAI/MemBrain}
+```json
+{
+  "dataset": "user_123",
+  "task": "persona_alice",
+  "messages": [
+    {
+      "speaker": "User",
+      "content": "I usually drink Dr. Pepper while debugging.",
+      "message_time": "2026-04-26T10:00:00+08:00"
+    }
+  ],
+  "store": true,
+  "digest": true
 }
 ```
 
----
+关键字段：
 
-## License
+- `dataset` / `task`：记忆隔离键，建议按用户和角色空间稳定生成。
+- `messages`：待写入消息。
+- `store`：保存原始消息。
+- `digest`：触发后台记忆构建。
+- `agent_profile`：可选，任务级 Agent 画像。
 
-This project is licensed under the [Apache 2.0](LICENSE) license.
+典型响应：
+
+```json
+{
+  "dataset_id": 1,
+  "task_pk": 1,
+  "session_id": 1,
+  "session_number": 1,
+  "digested_sessions": 0,
+  "status": "stored_and_digest_queued"
+}
+```
+
+### 检索记忆
+
+```http
+POST /api/memory/search
+```
+
+最小请求：
+
+```json
+{
+  "dataset": "user_123",
+  "task": "persona_alice",
+  "question": "What does the user usually drink while debugging?",
+  "mode": "expand",
+  "strategy": "rrf"
+}
+```
+
+检索参数：
+
+- `mode="direct"`：不做 LLM query 改写。
+- `mode="expand"`：默认模式，LLM 改写 + 多路检索。
+- `mode="reflect"`：在 `expand` 基础上增加一轮反思补检索。
+- `strategy="rrf"`：无需 rerank 服务。
+- `strategy="rerank"`：调用 rerank 服务重排候选事实。
+
+核心响应字段：
+
+- `packed_context`：给 Chatbot 注入 prompt 的最终记忆上下文。
+- `packed_token_count`：上下文估算 token 数。
+- `facts`：命中的事实。
+- `sessions`：相关会话摘要。
+
+### Chatbot 接入
+
+推荐映射：
+
+```text
+dataset = user_<owner_id>
+task    = persona_<persona_id>
+```
+
+典型流程：
+
+1. 用户和助手消息落库后调用 `POST /api/memory`，使用 `store=true, digest=true`。
+2. 回复前由上层 router 判断是否需要回忆。
+3. 需要回忆时调用 `POST /api/memory/search`，把 `packed_context` 注入回复 agent。
+
+## 3. Docker 部署
+
+镜像目标：干净的 `membrain-api` 微服务，只包含核心 API，不包含 demo、viewer、vLLM、benchmark 数据集和实验产物。
+
+### 首次启动
+
+```bash
+cp .env.example.deploy .env
+```
+
+编辑 `.env`，至少确认：
+
+```dotenv
+MEMBRAIN_IMAGE=ghcr.io/ai-friend-coming/membrain-api:main
+LLM_API_URL=http://host.docker.internal:4000/v1
+LLM_API_KEY=sk-1234
+EMBED_SERVICE_URL=http://host.docker.internal:9113/v1/embeddings
+EMBED_MODEL=qwen3-embed
+EMBED_DIM=2560
+```
+
+启动：
+
+```bash
+docker compose up -d
+curl http://localhost:9574/health
+```
+
+### Rerank 配置
+
+只有使用 `strategy="rerank"` 时需要：
+
+```dotenv
+RERANK_SERVICE_URL=http://host.docker.internal:9114/v1/rerank
+RERANK_MODEL=qwen3-rerank
+```
+
+### 更新或重启
+
+```bash
+./update.sh
+```
+
+`update.sh` 会拉取远端镜像：
+
+- 没有运行：直接启动。
+- 镜像变更：替换 API 容器。
+- 镜像相同：重启 API 容器。
+
+### 手动构建
+
+```bash
+docker build -t membrain-api:test .
+```
+
+让 Compose 使用本地镜像：
+
+```dotenv
+MEMBRAIN_IMAGE=membrain-api:test
+```
+
+### GitHub Actions
+
+`.github/workflows/docker-image.yml` 会在 push 到 `main` 或 `master` 后推送：
+
+```text
+ghcr.io/<owner>/membrain-api:main
+ghcr.io/<owner>/membrain-api:latest
+ghcr.io/<owner>/membrain-api:sha-<short_sha>
+```
