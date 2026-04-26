@@ -20,7 +20,7 @@ services:
       retries: 10
 
   membrain-api:
-    image: ${MEMBRAIN_IMAGE:-ghcr.io/ai-friend-coming/membrain-api:main}
+    image: ghcr.io/ai-friend-coming/membrain-api:main
     container_name: ${API_CONTAINER_NAME:-membrain-api}
     depends_on:
       db:
@@ -37,7 +37,7 @@ services:
       # 让 Linux Docker 也能用 host.docker.internal 访问宿主机上的 LLM/embedding/rerank 服务。
       - "host.docker.internal:host-gateway"
     ports:
-      - "${BACKEND_PORT:-9574}:${BACKEND_PORT:-9574}"
+      - "${BACKEND_PORT:-8094}:${BACKEND_PORT:-8094}"
     volumes:
       - ${EXPS_DIR:-./evaluation/exps}:/exps
     restart: unless-stopped

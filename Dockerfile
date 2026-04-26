@@ -29,13 +29,13 @@ COPY manifests ./manifests
 RUN uv sync --frozen --no-dev
 
 ENV BACKEND_HOST=0.0.0.0 \
-    BACKEND_PORT=9574 \
+    BACKEND_PORT=8094 \
     BACKEND_MODE=demo
 
-EXPOSE 9574
+EXPOSE 8094
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" || exit 1
 
 # 使用 shell 入口让 BACKEND_* 环境变量在容器运行时生效。
-CMD ["sh", "-c", "uvicorn membrain.api.server:app --host ${BACKEND_HOST:-0.0.0.0} --port ${BACKEND_PORT:-9574} --workers ${BACKEND_WORKERS:-1}"]
+CMD ["sh", "-c", "uvicorn membrain.api.server:app --host ${BACKEND_HOST:-0.0.0.0} --port ${BACKEND_PORT:-8094} --workers ${BACKEND_WORKERS:-1}"]

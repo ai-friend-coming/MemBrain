@@ -14,10 +14,10 @@ MemBrain 是一个面向 Agent / Chatbot 的长期记忆后端：写入多轮对
 
 ## 2. API 协议相关
 
-默认地址：
+Docker 部署默认地址：
 
 ```text
-http://localhost:9574
+http://localhost:8094
 ```
 
 接口文档：
@@ -25,16 +25,6 @@ http://localhost:9574
 ```text
 GET /docs
 GET /openapi.json
-```
-
-### 健康检查
-
-```http
-GET /health
-```
-
-```json
-{"status":"healthy"}
 ```
 
 ### 写入记忆
@@ -143,7 +133,6 @@ cp .env.example .env
 编辑 `.env`，至少确认：
 
 ```dotenv
-MEMBRAIN_IMAGE=ghcr.io/ai-friend-coming/membrain-api:main
 LLM_API_URL=http://host.docker.internal:4000/v1
 LLM_API_KEY=sk-1234
 EMBED_SERVICE_URL=http://host.docker.internal:9113/v1/embeddings
@@ -151,16 +140,7 @@ EMBED_MODEL=qwen3-embed
 EMBED_DIM=2560
 ```
 
-启动：
-
-```bash
-docker compose up -d
-curl http://localhost:9574/health
-```
-
-### Rerank 配置
-
-只有使用 `strategy="rerank"` 时需要：
+Rerank 配置: 只有使用 `strategy="rerank"` 时需要：
 
 ```dotenv
 RERANK_SERVICE_URL=http://host.docker.internal:9114/v1/rerank
@@ -178,25 +158,3 @@ RERANK_MODEL=qwen3-rerank
 - 没有运行：直接启动。
 - 镜像变更：替换 API 容器。
 - 镜像相同：重启 API 容器。
-
-### 手动构建
-
-```bash
-docker build -t membrain-api:test .
-```
-
-让 Compose 使用本地镜像：
-
-```dotenv
-MEMBRAIN_IMAGE=membrain-api:test
-```
-
-### GitHub Actions
-
-`.github/workflows/docker-image.yml` 会在 push 到 `main` 或 `master` 后推送：
-
-```text
-ghcr.io/<owner>/membrain-api:main
-ghcr.io/<owner>/membrain-api:latest
-ghcr.io/<owner>/membrain-api:sha-<short_sha>
-```
