@@ -44,6 +44,12 @@ app.include_router(viewer_router)
 app.include_router(pipeline_router)
 
 
+@app.get("/health")
+async def health_check() -> dict[str, str]:
+    """容器和负载均衡使用的轻量健康检查，不触发外部服务调用。"""
+    return {"status": "healthy"}
+
+
 def main() -> None:
     """Start uvicorn with mode-appropriate settings.
 

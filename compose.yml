@@ -1,15 +1,43 @@
 services:
   db:
     image: paradedb/paradedb:0.21.11
-    container_name: MemBrain
-    shm_size: '1g'
+    container_name: ${DB_CONTAINER_NAME:-membrain-db}
+    shm_size: "1g"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWD}
-      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWD:-MemBrain}
+      POSTGRES_DB: ${DB_NAME:-MemBrain}
     ports:
-      - "${DB_PORT}:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
-      - ${LOCAL_DATA_DIR}:/var/lib/postgresql
-      - ${EXPS_DIR}:/exps
+      - ${LOCAL_DATA_DIR:-./database}:/var/lib/postgresql
+      - ${EXPS_DIR:-./evaluation/exps}:/exps
     command: postgres -c max_connections=150
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  membrain-api:
+    image: ${MEMBRAIN_IMAGE:-ghcr.io/ai-friend-coming/membrain-api:main}
+    container_name: ${API_CONTAINER_NAME:-membrain-api}
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ${MEMBRAIN_ENV_FILE:-.env}
+    environment:
+      # 容器内访问 Compose 数据库必须使用服务名 db，而不是宿主机 localhost。
+      DB_HOST: db
+      DB_PORT: 5432
+      BACKEND_HOST: 0.0.0.0
+      EXPS_DIR: /exps
+    extra_hosts:
+      # 让 Linux Docker 也能用 host.docker.internal 访问宿主机上的 LLM/embedding/rerank 服务。
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${BACKEND_PORT:-9574}:${BACKEND_PORT:-9574}"
+    volumes:
+      - ${EXPS_DIR:-./evaluation/exps}:/exps
+    restart: unless-stopped
