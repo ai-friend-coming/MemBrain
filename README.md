@@ -20,13 +20,6 @@ Docker 部署默认地址：
 http://localhost:8094
 ```
 
-接口文档：
-
-```text
-GET /docs
-GET /openapi.json
-```
-
 ### 写入记忆
 
 ```http
@@ -72,6 +65,23 @@ POST /api/memory
 }
 ```
 
+响应字段：
+
+- `dataset_id`：内部数据集 ID。
+- `task_pk`：内部任务主键 ID。
+- `session_id`：本次新写入的会话 ID；当 `store=false` 时为 `null`。
+- `session_number`：当前 task 下递增的会话序号；当 `store=false` 时为 `null`。
+- `digested_sessions`：当前固定返回 `0`，因为 digest 是后台异步执行。
+- `status`：处理状态。
+
+`status` 可能值：
+
+- `"stored"`：只保存原始消息，未触发 digest。
+- `"stored_and_digest_queued"`：已保存原始消息，并已把 digest 放入后台队列。
+- `"digest_queued"`：未写入新消息，只把已有未处理会话放入 digest 队列。
+
+注意：`digest=true` 时接口会在后台任务入队后立即返回；新写入记忆需要等 digest 完成后才能被 `/api/memory/search` 检索到。
+
 ### 检索记忆
 
 ```http
@@ -102,8 +112,63 @@ POST /api/memory/search
 
 - `packed_context`：给 Chatbot 注入 prompt 的最终记忆上下文。
 - `packed_token_count`：上下文估算 token 数。
-- `facts`：命中的事实。
-- `sessions`：相关会话摘要。
+- `fact_ids`：进入 `packed_context` 的事实 ID 列表。
+- `facts`：检索、融合、重排后的事实明细，按相关性排序。
+- `sessions`：对当前问题有贡献的相关会话摘要。
+- `raw_messages`：当前版本固定为空数组。
+
+典型响应：
+
+```json
+{
+  "packed_context": "## Relevant Episodes\n\n**Debugging and beverages**: Alice talked about drinking Dr. Pepper while debugging.\n---\n\n## Additional Facts\n- User usually drinks Dr. Pepper while debugging [2026-04-26]",
+  "packed_token_count": 43,
+  "fact_ids": [1],
+  "facts": [
+    {
+      "fact_id": 1,
+      "text": "User usually drinks Dr. Pepper while debugging",
+      "source": "bm25",
+      "rerank_score": 0.91,
+      "time_info": "2026-04-26",
+      "entity_ref": "User",
+      "aspect_path": "Habits > Beverages"
+    }
+  ],
+  "sessions": [
+    {
+      "session_summary_id": 1,
+      "session_id": 1,
+      "subject": "Debugging and beverages",
+      "content": "Alice talked about drinking Dr. Pepper while debugging.",
+      "score": 0.82,
+      "source": "fact_agg",
+      "contributing_facts": 1
+    }
+  ],
+  "raw_messages": []
+}
+```
+
+`facts[*]` 字段：
+
+- `fact_id`：事实 ID。
+- `text`：事实文本，实体引用已尽量解析为可读文本。
+- `source`：命中的检索路径，常见值包括 `"bm25"`、`"embed"`、`"tree"`、`"bm25_parsed"`。
+- `rerank_score`：融合或 rerank 后的相关性分数。
+- `time_info`：事实关联时间。
+- `entity_ref`：事实归属的规范实体。
+- `aspect_path`：事实在实体树中的路径。
+
+`sessions[*]` 字段：
+
+- `session_summary_id`：会话摘要 ID。
+- `session_id`：原始会话 ID。
+- `subject`：会话主题。
+- `content`：会话摘要内容。
+- `score`：会话相关性分数。
+- `source`：会话命中来源，常见值包括 `"bm25"`、`"fact_agg"`。
+- `contributing_facts`：贡献到该会话摘要的事实数量。
 
 ### Chatbot 接入
 
