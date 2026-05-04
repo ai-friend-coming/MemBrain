@@ -7,8 +7,6 @@ services:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWD:-MemBrain}
       POSTGRES_DB: ${DB_NAME:-MemBrain}
-    ports:
-      - "${DB_PORT:-5432}:5432"
     volumes:
       - ${LOCAL_DATA_DIR:-./database}:/var/lib/postgresql
       - ${EXPS_DIR:-./evaluation/exps}:/exps
