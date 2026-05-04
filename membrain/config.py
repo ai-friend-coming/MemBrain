@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Server
     BACKEND_HOST: str = "127.0.0.1"
-    BACKEND_PORT: int = 9574
+    BACKEND_PORT: int = 8094
     # dev        — 1 worker, reload enabled (file-watch hot reload)
     # evaluation — 1 worker, no reload (stable, for exp run / QA pipelines)
     # demo       — BACKEND_WORKERS workers, no reload (for conversation demo)

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # Server
     BACKEND_HOST: str = "127.0.0.1"
-    BACKEND_PORT: int = 9574
+    BACKEND_PORT: int = 10413
     BACKEND_RELOAD: bool = False
 
     # CORS

@@ -15,7 +15,7 @@ if [[ ! -f .env ]]; then
 fi
 
 # ── Read backend port (for display only) ──────────────────────────────────────
-BACKEND_PORT="${BACKEND_PORT:-9574}"
+BACKEND_PORT="${BACKEND_PORT:-10413}"
 if [[ -f .env ]]; then
   _port=$(grep -E '^BACKEND_PORT=' .env | cut -d= -f2 | tr -d ' "' || true)
   [[ -n "$_port" ]] && BACKEND_PORT="$_port"

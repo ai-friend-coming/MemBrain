@@ -42,7 +42,7 @@ The three operating modes are controlled by the `store` and `digest` flags.
 Persists the messages as a new session without triggering digestion. Useful when batching multiple sessions before a single digest pass.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory" \
+curl -X POST "http://localhost:8094/api/memory" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -71,7 +71,7 @@ Response `status`: `"stored"`
 Persists the session and immediately enqueues background digestion of all unprocessed sessions. This is the standard mode for real-time conversations.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory" \
+curl -X POST "http://localhost:8094/api/memory" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -100,7 +100,7 @@ Response `status`: `"stored_and_digest_queued"`
 Triggers digestion on all existing unprocessed sessions without adding new data. Useful for reprocessing or when sessions were pre-loaded via another path.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory" \
+curl -X POST "http://localhost:8094/api/memory" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -181,7 +181,7 @@ The six retrieval paths are:
 Runs paths A, B, and C directly on the original question with no LLM calls. Fastest and cheapest.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory/search" \
+curl -X POST "http://localhost:8094/api/memory/search" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -196,7 +196,7 @@ curl -X POST "http://localhost:9574/api/memory/search" \
 Rewrites the question and generates multiple query variants before retrieval, activating all six paths. Best balance of recall and latency.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory/search" \
+curl -X POST "http://localhost:8094/api/memory/search" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -211,7 +211,7 @@ curl -X POST "http://localhost:9574/api/memory/search" \
 After round-1 retrieval, an LLM evaluates whether the retrieved facts are sufficient to answer the question. If not, it generates 1–2 targeted follow-up queries and performs a second retrieval pass. Highest recall, highest cost.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory/search" \
+curl -X POST "http://localhost:8094/api/memory/search" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -232,7 +232,7 @@ Combines ranked lists from all active paths using the RRF formula: each fact's s
 Best choice when a rerank service is unavailable or when latency matters.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory/search" \
+curl -X POST "http://localhost:8094/api/memory/search" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -247,7 +247,7 @@ curl -X POST "http://localhost:9574/api/memory/search" \
 Passes all candidate facts to a cross-encoder reranker (configured via `RERANK_SERVICE_URL`) for precise relevance scoring. Requires a running rerank service. Higher accuracy, higher latency.
 
 ```bash
-curl -X POST "http://localhost:9574/api/memory/search" \
+curl -X POST "http://localhost:8094/api/memory/search" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -263,7 +263,7 @@ Controls how many top-scored facts survive after fusion. Facts beyond `top_k` ar
 
 ```bash
 # Retrieve more facts for a complex multi-hop question
-curl -X POST "http://localhost:9574/api/memory/search" \
+curl -X POST "http://localhost:8094/api/memory/search" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset": "lab_member_001_okabe",
@@ -361,4 +361,3 @@ curl -X POST "http://localhost:9574/api/memory/search" \
 | `expand` | `rerank` | Higher precision when a rerank service is available |
 | `reflect` | `rrf` | Maximum recall without a rerank service |
 | `reflect` | `rerank` | Maximum recall and precision for hard multi-hop questions |
-

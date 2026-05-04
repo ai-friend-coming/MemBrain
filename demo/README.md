@@ -61,7 +61,7 @@ DB_PASSWD=MemBrain
 DB_NAME=MemBrain-Demo
 
 # Backend Port (Demo's MEMBRAIN_BASE_URL must match this)
-BACKEND_PORT=9574
+BACKEND_PORT=8094
 BACKEND_MODE=demo       # Options: dev | evaluation | demo
 BACKEND_WORKERS=4       # Valid only in demo mode
 
@@ -83,7 +83,7 @@ uv sync
 uv run backend
 ```
 
-Once started successfully, the backend will listen on `http://127.0.0.1:9574` (or whatever `BACKEND_PORT` you configured).
+Once started successfully, the backend will listen on `http://127.0.0.1:8094` (or whatever `BACKEND_PORT` you configured).
 
 ---
 
@@ -107,7 +107,7 @@ LLM_API_KEY=sk-1234
 BACKEND_PORT=10413
 
 # MemBrain backend address
-MEMBRAIN_BASE_URL=http://127.0.0.1:9574
+MEMBRAIN_BASE_URL=http://127.0.0.1:8094
 
 # 💡 Leave empty or comment out to disable long-term memory features entirely:
 # MEMBRAIN_BASE_URL=
