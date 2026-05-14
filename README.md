@@ -223,3 +223,31 @@ RERANK_MODEL=qwen3-rerank
 - 没有运行：直接启动。
 - 镜像变更：替换 API 容器。
 - 镜像相同：重启 API 容器。
+
+### 一键启动模式
+
+统一入口：
+
+```bash
+MEMBRAIN_PROFILE=thirdparty ENV_FILE=.env ./scripts/membrain-up.sh
+```
+
+可选模式：
+
+- `thirdparty`：纯 Docker 部署，MemBrain API 调第三方 LLM / embedding / rerank API。
+- `linux-local`：Linux 本地模型部署，MemBrain API 仍在 Docker 中运行，embedding / rerank 通过本机 HTTP 服务暴露。
+- `mac-mlx`：Apple Silicon Mac 本地 MLX 部署，数据库跑 Docker，MemBrain API 在宿主机进程内通过 MLX/Metal 加载 0.6B embedding 与 rerank 模型。
+
+Mac MLX 示例：
+
+```bash
+MEMBRAIN_PROFILE=mac-mlx ENV_FILE=.env_1 ./scripts/membrain-up.sh
+```
+
+停止：
+
+```bash
+MEMBRAIN_PROFILE=mac-mlx ENV_FILE=.env_1 ./scripts/membrain-down.sh
+```
+
+注意：MLX 依赖 macOS Metal，不能封装进 Linux Docker 容器内运行。Mac MLX 模式会自动启动 Docker 数据库、停止 Docker API 容器，并用 `screen` 在宿主机后台启动 MemBrain API。

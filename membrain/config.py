@@ -1,11 +1,13 @@
 """Configuration management using Pydantic Settings."""
 
+import os
 from functools import cached_property
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_ENV_FILE = os.getenv("MEMBRAIN_ENV_FILE", ".env")
 
 
 class Settings(BaseSettings):
@@ -46,15 +48,26 @@ class Settings(BaseSettings):
     EXPS_DIR: str = "evaluation/exps"
 
     # Embedding service
+    # http：调用 OpenAI-compatible 服务；mlx：在 Apple Silicon 本机进程内推理。
+    EMBED_BACKEND: str = "http"
     EMBED_SERVICE_URL: str = "http://localhost:9113/v1/embeddings"
     EMBED_API_KEY: str = ""
     EMBED_MODEL: str = "qwen3-embed"
     EMBED_DIM: int = 2560  # must match model; if changed, recreate DB
+    MLX_EMBED_MODEL: str = "mlx-community/Qwen3-Embedding-0.6B-8bit"
+    MLX_EMBED_MAX_LENGTH: int = 512
 
     # Rerank service
+    # http：调用外部 rerank API；mlx：使用 Qwen3 reranker 的 yes/no token 概率打分。
+    RERANK_BACKEND: str = "http"
     RERANK_SERVICE_URL: str = "http://localhost:9114/v1/rerank"
     RERANK_API_KEY: str = ""
     RERANK_MODEL: str = "qwen3-rerank"
+    MLX_RERANK_MODEL: str = "mlx-community/Qwen3-Reranker-0.6B-mxfp8"
+    MLX_RERANK_MAX_LENGTH: int = 4096
+    MLX_RERANK_INSTRUCTION: str = (
+        "Given a web search query, retrieve relevant passages that answer the query"
+    )
 
     # Fact extraction batching
     EXTRACT_BATCH_MAX_MESSAGES: int = 10
@@ -125,7 +138,7 @@ class Settings(BaseSettings):
     QA_SEARCH_POOL_SIZE: int = 20
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )

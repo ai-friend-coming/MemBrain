@@ -15,6 +15,7 @@ build/
 # Environment
 .env
 .env.local
+.env_*
 
 # Node
 node_modules/

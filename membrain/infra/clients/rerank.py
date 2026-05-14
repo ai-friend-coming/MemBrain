@@ -89,6 +89,10 @@ class RerankClient:
 
         Returns list of {"index": int, "relevance_score": float} sorted desc.
         """
+        if settings.RERANK_BACKEND.lower() == "mlx":
+            from membrain.infra.clients.mlx_local import mlx_rerank
+
+            return mlx_rerank(query, documents, top_n)
         resp = self._retry_request(
             "POST",
             self.url,

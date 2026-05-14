@@ -85,6 +85,10 @@ class EmbeddingClient:
         """Embed a list of texts, returning a list of vectors."""
         if not texts:
             return []
+        if settings.EMBED_BACKEND.lower() == "mlx":
+            from membrain.infra.clients.mlx_local import mlx_embed
+
+            return mlx_embed(texts)
         resp = self._retry_request(
             "POST",
             self.url,
