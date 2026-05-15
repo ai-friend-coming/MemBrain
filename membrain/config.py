@@ -69,10 +69,10 @@ class Settings(BaseSettings):
         "Given a web search query, retrieve relevant passages that answer the query"
     )
 
-    # Fact extraction batching
-    EXTRACT_BATCH_MAX_MESSAGES: int = 10
-    EXTRACT_BATCH_MAX_CHARS: int = 1500
-    EXTRACT_CONTEXT_TAIL_SIZE: int = 10
+    # 事实抽取分片：限制每个抽取批次的消息数、正文字符数，并保留上一批尾部消息作上下文。
+    EXTRACT_BATCH_MAX_MESSAGES: int = 50
+    EXTRACT_BATCH_MAX_CHARS: int = 2000
+    EXTRACT_CONTEXT_TAIL_SIZE: int = 15
 
     # Entity resolution
     RESOLVER_CANDIDATE_TOP_K: int = 10
