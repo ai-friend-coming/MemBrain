@@ -384,6 +384,7 @@ class IngestWorkflow(ABC):
         session_number: int | None,
     ) -> list[str] | None:
         """Stage 4: Persist to database and update entity tree."""
+        await self._resolve_fact_equivalences(facts, decisions, task_pk)
         self._ingest_store.persist_batch(
             task_id=task_pk,
             batch_id=batch_id,
@@ -406,6 +407,105 @@ class IngestWorkflow(ABC):
             log.debug("entity tree -> %d tree(s) updated", len(profiled_entities))
 
         return profiled_entities or None
+
+    async def _resolve_fact_equivalences(
+        self,
+        facts: list[dict],
+        decisions: list[dict],
+        task_pk: int,
+    ) -> None:
+        """解析新事实与已存候选是否表达同一完整命题。
+
+        Args:
+            facts: 当前批次抽取的新事实，匹配成功时会写入已存事实 ID。
+            decisions: 当前批次已完成的实体解析决策。
+            task_pk: 事实所属任务主键。
+        """
+        exact_ids, candidate_groups = (
+            self._ingest_store.load_fact_equivalence_candidates(
+                facts,
+                decisions,
+                task_pk,
+                self._embed_client,
+            )
+        )
+        for fact, exact_id in zip(facts, exact_ids):
+            if exact_id is not None:
+                fact["_equivalent_fact_id"] = exact_id
+
+        entity_id_by_ref = {
+            decision["batch_ref"]: decision.get("target_entity_id")
+            or f"new:{decision['batch_ref']}"
+            for decision in decisions
+        }
+        comparisons = [
+            {
+                "new_fact_index": index,
+                "text": fact["text"],
+                "entities": [
+                    {"ref": ref, "entity_id": entity_id_by_ref[ref]}
+                    for ref in _ENTITY_BRACKET_RE.findall(fact["text"])
+                    if ref in entity_id_by_ref
+                ],
+                "candidates": candidates,
+            }
+            for index, (fact, candidates) in enumerate(zip(facts, candidate_groups))
+            if exact_ids[index] is None and candidates
+        ]
+        if not comparisons:
+            return
+
+        resolver, resolver_settings = self._factory.get_agent(
+            "fact-resolver",
+            profile=self._profile,
+        )
+        prompts = self._registry.render_prompts(
+            "fact-resolver",
+            profile=self._profile,
+            comparisons_json=json.dumps(comparisons, ensure_ascii=False),
+        )
+        result = await run_agent_with_retry(
+            resolver,
+            instructions=prompts,
+            model_settings=resolver_settings,
+        )
+
+        comparisons_by_index = {
+            comparison["new_fact_index"]: comparison for comparison in comparisons
+        }
+        for resolution in result.output.resolutions:
+            index = resolution.new_fact_index
+            matched_id = resolution.matched_fact_id
+            comparison = comparisons_by_index.get(index)
+            if matched_id is None or comparison is None:
+                continue
+            matched_candidate = next(
+                (
+                    candidate
+                    for candidate in comparison["candidates"]
+                    if candidate["fact_id"] == matched_id
+                ),
+                None,
+            )
+            if matched_candidate is None:
+                continue
+            new_entity_ids = {entity["entity_id"] for entity in comparison["entities"]}
+            candidate_entity_ids = {
+                entity["entity_id"] for entity in matched_candidate["entities"]
+            }
+            # 完整命题等价必须保留相同的稳定实体集合，不能只相信模型选择的 fact_id。
+            if new_entity_ids != candidate_entity_ids:
+                log.warning(
+                    "fact-resolver rejected entity mismatch for fact_id=%s",
+                    matched_id,
+                )
+                continue
+            facts[index]["_equivalent_fact_id"] = matched_id
+            log.info(
+                "    [fact-resolver] 复用 fact_id=%s: %s",
+                matched_id,
+                facts[index]["text"],
+            )
 
 
 class DefaultIngestWorkflow(IngestWorkflow):

@@ -5,8 +5,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from sqlalchemy import text as sa_text
+
 from membrain.config import settings
-from membrain.infra.persistence.batch_writer import write_batch_results
+from membrain.infra.models.memory import FactModel, FactRefModel, FactStatus
+from membrain.infra.persistence.batch_writer import (
+    _extract_bracket_refs,
+    write_batch_results,
+)
 from membrain.infra.queries import entities as entity_queries
 from membrain.infra.retrieval.candidate_retrieval import (
     EntityContext,
@@ -18,6 +24,56 @@ from membrain.infra.transaction_manager import TransactionManager
 from membrain.memory.core.entity_resolver import resolve_entities
 
 log = logging.getLogger(__name__)
+
+_FACT_EQUIVALENCE_CANDIDATE_TOP_K = 5
+_FACT_EQUIVALENCE_MIN_SIMILARITY = 0.6
+
+
+def _match_exact_fact_ids(
+    facts: list[dict],
+    decisions: list[dict],
+    exact_rows: list[tuple[int, str]],
+    fact_ref_rows: list[tuple[int, str, str]],
+) -> list[int | None]:
+    """按文本和稳定实体身份选择可直接复用的事实。
+
+    Args:
+        facts: 当前批次抽取的新事实。
+        decisions: 当前批次已完成的实体解析决策。
+        exact_rows: 文本相同的已存事实 ID 和文本。
+        fact_ref_rows: 已存事实的实体 ID 和原始引用。
+
+    Returns:
+        list[int | None]: 与新事实顺序对齐的精确命中 ID。
+    """
+    entity_id_by_ref = {
+        decision["batch_ref"]: decision.get("target_entity_id")
+        or f"new:{decision['batch_ref']}"
+        for decision in decisions
+    }
+    fact_ids_by_text: dict[str, list[int]] = {}
+    for fact_id, fact_text in exact_rows:
+        fact_ids_by_text.setdefault(fact_text, []).append(fact_id)
+
+    stored_ids_by_ref: dict[tuple[int, str], set[str]] = {}
+    for fact_id, entity_id, alias_text in fact_ref_rows:
+        stored_ids_by_ref.setdefault((fact_id, alias_text), set()).add(entity_id)
+
+    exact_ids: list[int | None] = []
+    for fact in facts:
+        refs = _extract_bracket_refs(fact["text"])
+        matched_id = None
+        for candidate_id in fact_ids_by_text.get(fact["text"], []):
+            if not refs or all(
+                entity_id_by_ref.get(ref) is not None
+                and stored_ids_by_ref.get((candidate_id, ref))
+                == {entity_id_by_ref[ref]}
+                for ref in refs
+            ):
+                matched_id = candidate_id
+                break
+        exact_ids.append(matched_id)
+    return exact_ids
 
 
 def _interleave_candidates(
@@ -139,6 +195,129 @@ class MemoryIngestStore:
                 db=db,
                 embed_client=embed_client,
             )
+
+    def load_fact_equivalence_candidates(
+        self,
+        facts: list[dict],
+        decisions: list[dict],
+        task_id: int,
+        embed_client,
+    ) -> tuple[list[int | None], list[list[dict]]]:
+        """优先精确匹配事实，再为其余事实召回语义候选。
+
+        Args:
+            facts: 当前批次抽取的新事实。
+            decisions: 当前批次已完成的实体解析决策。
+            task_id: 事实所属任务主键。
+            embed_client: 事实向量客户端。
+
+        Returns:
+            tuple[list[int | None], list[list[dict]]]: 与新事实顺序对齐的精确
+            命中 ID 和语义候选列表。
+        """
+        if not facts:
+            return [], []
+
+        fact_texts = list(dict.fromkeys(fact["text"] for fact in facts))
+        with self._transactions.read() as db:
+            exact_rows = (
+                db.query(FactModel.id, FactModel.text)
+                .filter(
+                    FactModel.task_id == task_id,
+                    FactModel.status == FactStatus.ACTIVE,
+                    FactModel.text.in_(fact_texts),
+                )
+                .order_by(FactModel.id)
+                .all()
+            )
+            exact_fact_ids = [fact_id for fact_id, _ in exact_rows]
+            exact_ref_rows = (
+                db.query(
+                    FactRefModel.fact_id,
+                    FactRefModel.entity_id,
+                    FactRefModel.alias_text,
+                )
+                .filter(FactRefModel.fact_id.in_(exact_fact_ids))
+                .all()
+                if exact_fact_ids
+                else []
+            )
+
+        exact_ids = _match_exact_fact_ids(
+            facts,
+            decisions,
+            exact_rows,
+            exact_ref_rows,
+        )
+        unresolved = [
+            (index, fact)
+            for index, fact in enumerate(facts)
+            if exact_ids[index] is None
+        ]
+        candidates: list[list[dict]] = [[] for _ in facts]
+        if not unresolved:
+            return exact_ids, candidates
+
+        try:
+            vectors = embed_client.embed([fact["text"] for _, fact in unresolved])
+        except Exception:
+            log.warning("事实等价候选向量生成失败", exc_info=True)
+            return exact_ids, candidates
+
+        sql = sa_text("""
+            SELECT id, text,
+                   -(text_embedding <#> CAST(:vec AS halfvec)) AS similarity
+            FROM facts
+            WHERE task_id = :task_id
+              AND text_embedding IS NOT NULL
+              AND status = 'active'
+              AND -(text_embedding <#> CAST(:vec AS halfvec)) >= :min_similarity
+            ORDER BY text_embedding <#> CAST(:vec AS halfvec)
+            LIMIT :limit
+        """)
+        candidate_rows: dict[int, list[tuple[int, str]]] = {}
+        with self._transactions.read() as db:
+            for (index, _), vector in zip(unresolved, vectors):
+                vector_literal = "[" + ",".join(str(value) for value in vector) + "]"
+                rows = db.execute(
+                    sql,
+                    {
+                        "vec": vector_literal,
+                        "task_id": task_id,
+                        "min_similarity": _FACT_EQUIVALENCE_MIN_SIMILARITY,
+                        "limit": _FACT_EQUIVALENCE_CANDIDATE_TOP_K,
+                    },
+                ).fetchall()
+                candidate_rows[index] = [(row[0], row[1]) for row in rows]
+
+            candidate_ids = {
+                fact_id for rows in candidate_rows.values() for fact_id, _ in rows
+            }
+            refs_by_fact: dict[int, list[dict]] = {}
+            if candidate_ids:
+                for fact_id, entity_id, alias_text in (
+                    db.query(
+                        FactRefModel.fact_id,
+                        FactRefModel.entity_id,
+                        FactRefModel.alias_text,
+                    )
+                    .filter(FactRefModel.fact_id.in_(candidate_ids))
+                    .all()
+                ):
+                    refs_by_fact.setdefault(fact_id, []).append(
+                        {"ref": alias_text, "entity_id": entity_id}
+                    )
+
+        for index, rows in candidate_rows.items():
+            candidates[index] = [
+                {
+                    "fact_id": fact_id,
+                    "text": fact_text,
+                    "entities": refs_by_fact.get(fact_id, []),
+                }
+                for fact_id, fact_text in rows
+            ]
+        return exact_ids, candidates
 
     async def resolve_entity_decisions(
         self,

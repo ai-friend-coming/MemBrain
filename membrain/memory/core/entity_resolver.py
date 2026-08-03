@@ -145,6 +145,54 @@ def build_resolver_indexes(
 
 # Sentinel: Layer 1 found multiple entities for the same normalized name
 LAYER1_AMBIGUOUS = "AMBIGUOUS"
+_POSSESSIVE_ENTITY_RE = re.compile(r"^(.+?)(?:['’]s)\s+.+$", re.IGNORECASE)
+_DESCRIPTION_OWNER_RE = re.compile(r"\b([A-Z][\w-]*(?:\s+[A-Z][\w-]*)*)['’]s\b")
+
+
+def _entity_identity_conflicts(
+    new_ref: str,
+    target_ref: str,
+    target_aliases: list[str],
+    target_desc: str,
+) -> bool:
+    """判断新引用与候选实体是否存在确定的身份类型冲突。
+
+    Args:
+        new_ref: 当前批次抽取出的实体引用。
+        target_ref: 候选旧实体的规范引用。
+        target_aliases: 候选旧实体已有的全部别名。
+        target_desc: 候选旧实体的描述。
+
+    Returns:
+        bool: 所有者不同或人物与关联对象类型冲突时返回 True。
+    """
+    new_owner_match = _POSSESSIVE_ENTITY_RE.match(new_ref)
+    new_owner = _normalize(new_owner_match.group(1)) if new_owner_match else None
+
+    target_names = [target_ref, *target_aliases]
+    target_owners = {
+        _normalize(match.group(1))
+        for name in target_names
+        if (match := _POSSESSIVE_ENTITY_RE.match(name)) is not None
+    }
+    target_owners.update(
+        _normalize(owner) for owner in _DESCRIPTION_OWNER_RE.findall(target_desc)
+    )
+    if new_owner is not None and target_owners and new_owner not in target_owners:
+        return True
+
+    new_is_person_name = (
+        new_owner is None
+        and 1 <= len(new_ref.split()) <= 4
+        and all(word.istitle() for word in new_ref.split())
+    )
+    target_has_person_name = any(
+        _POSSESSIVE_ENTITY_RE.match(name) is None
+        and 1 <= len(name.split()) <= 4
+        and all(word.istitle() for word in name.split())
+        for name in target_names
+    )
+    return new_is_person_name and (bool(target_owners) or not target_has_person_name)
 
 
 def layer1_exact(
@@ -326,7 +374,20 @@ async def resolve_entities(
     factory,
     profile: str | None = None,
 ) -> list[dict]:
-    """Run three-layer resolution on create decisions. Returns updated decisions."""
+    """解析新实体与已有稳定身份的对应关系。
+
+    Args:
+        decisions: 当前批次的实体创建或合并决策。
+        db: 当前任务 schema 的数据库会话。
+        task_id: 实体所属任务主键。
+        embed_client: 候选召回使用的向量客户端。
+        registry: entity resolver 的 prompt 注册表。
+        factory: entity resolver 的 agent 工厂。
+        profile: 可选的 agent profile。
+
+    Returns:
+        list[dict]: 已完成稳定身份解析的实体决策。
+    """
     from membrain.infra.retrieval.candidate_retrieval import retrieve_candidate_pool
 
     create_decisions = [d for d in decisions if d["action"] == "create"]
@@ -350,11 +411,9 @@ async def resolve_entities(
     for d in create_decisions:
         ref = d["canonical_ref"]
         dec = layer1_exact(ref, indexes)
-        if dec is LAYER1_AMBIGUOUS:
-            # Ambiguous exact match → skip Layer 2, go straight to Layer 3
+        if dec is not None:
+            # 同名不代表同一身份；description 上下文必须参与最终判断。
             unresolved_refs.append(ref)
-        elif dec is not None:
-            resolver_map[ref] = dec
         else:
             # No exact match → try Layer 2
             dec = layer2_minhash(ref, indexes)
@@ -387,6 +446,19 @@ async def resolve_entities(
             continue
         # Convert create → merge
         target = by_entity_id.get(rdec.target_entity_id)
+        if target is not None and _entity_identity_conflicts(
+            ref,
+            target.canonical_ref,
+            aliases_by_entity.get(target.entity_id, []),
+            target.desc,
+        ):
+            log.warning(
+                "entity-resolver rejected incompatible entities %s -> %s",
+                ref,
+                target.canonical_ref,
+            )
+            result.append(d)
+            continue
         result.append(
             {
                 "batch_ref": d["batch_ref"],

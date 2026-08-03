@@ -3,7 +3,7 @@
   "type": "agent",
   "description": "Extracts a deduplicated list of entity reference names from chat messages",
   "model": "gpt-4.1-mini",
-  "temperature": 1,
+  "temperature": 0,
   "schema": "schema.py",
   "parameters": {
     "entity_context": {

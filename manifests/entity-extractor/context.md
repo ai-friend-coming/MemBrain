@@ -3,6 +3,8 @@
 {% if entity_context and entity_context != "(none yet)" %}
 ## Known Entities (from memory)
 The following entities are already stored. When what you are extracting clearly refers to the same thing, **reuse the exact ref shown here** rather than paraphrasing.
+**Known entities mentioned again in the messages below must still be included in `entities`.**
+This list standardizes their refs; it never means they should be omitted from the current extraction.
 
 {{ entity_context }}
 
@@ -18,4 +20,5 @@ The following entities are already stored. When what you are extracting clearly 
 - Use a relationship-based ref for relational groups (e.g. `Nate's regulars`, `Sara's family`).
 - If a vague geographic reference can be resolved to a specific place from context, use the specific name.
 - Output only entity reference name strings — no descriptions, no IDs.
+- Repeated known entities still belong in the output when the current messages mention them.
 </reminders>

@@ -3,7 +3,7 @@
   "type": "agent",
   "description": "Generates bracketed atomic facts from a fixed entity list and chat messages",
   "model": "gpt-4.1-mini",
-  "temperature": 1,
+  "temperature": 0,
   "schema": "schema.py",
   "parameters": {
     "entity_list_json": {
