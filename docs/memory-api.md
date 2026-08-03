@@ -19,6 +19,7 @@ Accepts new conversation messages and/or triggers memory digestion — the proce
 |-------|------|----------|---------|-------------|
 | `dataset` | string | yes | — | Namespace for a user or persona (e.g. `"lab_member_001_okabe"`) |
 | `task` | string | yes | — | Sub-namespace for a conversation context (e.g. `"casual_chat_with_amadeus"`) |
+| `chat_id` | string | yes | — | External application chat ID recorded as memory provenance |
 | `messages` | array | if `store=true` | `[]` | Ordered list of messages in this session |
 | `session_time` | string | no | `""` | ISO 8601 timestamp representing the session start |
 | `store` | bool | no | `true` | Persist `messages` as a new raw session |
@@ -47,6 +48,7 @@ curl -X POST "http://localhost:8094/api/memory" \
   -d '{
     "dataset": "lab_member_001_okabe",
     "task": "casual_chat_with_amadeus",
+    "chat_id": "chat_987",
     "messages": [
       {
         "speaker": "Okabe",
@@ -76,6 +78,7 @@ curl -X POST "http://localhost:8094/api/memory" \
   -d '{
     "dataset": "lab_member_001_okabe",
     "task": "casual_chat_with_amadeus",
+    "chat_id": "chat_987",
     "messages": [
       {
         "speaker": "Okabe",
@@ -105,6 +108,7 @@ curl -X POST "http://localhost:8094/api/memory" \
   -d '{
     "dataset": "lab_member_001_okabe",
     "task": "casual_chat_with_amadeus",
+    "chat_id": "chat_987",
     "store": false,
     "digest": true
   }'
@@ -154,6 +158,13 @@ Queries the memory store for a given question, running up to six retrieval paths
 | `mode` | string | no | `"expand"` | Retrieval mode: `"direct"`, `"expand"`, or `"reflect"` |
 | `strategy` | string | no | `"rrf"` | Fusion strategy: `"rrf"` or `"rerank"` |
 | `top_k` | int | no | `12` | Number of top facts to keep after fusion (configurable via `QA_RERANK_TOP_K`) |
+
+The search endpoint does not accept a `chat_id` filter. It always searches the
+full `dataset + task` memory space and returns provenance in
+`facts[*].source_chat_ids` so downstream applications can apply their own
+current-chat or cross-chat rules. `packed_context` remains unfiltered;
+applications that filter structured results must rebuild the prompt context
+from the selected `facts` and `sessions`.
 
 ### `mode` parameter
 
@@ -290,6 +301,7 @@ curl -X POST "http://localhost:8094/api/memory/search" \
 |-------|------|-------------|
 | `fact_id` | int | Unique fact identifier |
 | `text` | string | Fact text with entity references resolved |
+| `source_chat_ids` | array[string] | All external chat IDs that contributed this fact |
 | `source` | string | Retrieval path that found this fact: `"bm25"`, `"embed"`, `"tree"`, or `"bm25_parsed"` |
 | `rerank_score` | float | Relevance score after fusion or reranking |
 | `time_info` | string | Resolved timestamp, e.g. `"2025-12-05"` |
@@ -302,6 +314,7 @@ curl -X POST "http://localhost:8094/api/memory/search" \
 |-------|------|-------------|
 | `session_summary_id` | int | Unique session summary identifier |
 | `session_id` | int | Parent session identifier |
+| `chat_id` | string | External chat ID associated with the session |
 | `subject` | string | One-line subject of the session |
 | `content` | string | Full session summary text |
 | `score` | float | Relevance score |
@@ -319,6 +332,7 @@ curl -X POST "http://localhost:8094/api/memory/search" \
     {
       "fact_id": 1,
       "text": "Okabe drinks Dr. Pepper while debugging",
+      "source_chat_ids": ["chat_987"],
       "source": "bm25",
       "rerank_score": 0.032,
       "time_info": "2025-12-05",
@@ -328,6 +342,7 @@ curl -X POST "http://localhost:8094/api/memory/search" \
     {
       "fact_id": 2,
       "text": "Okabe thinks Dr. Pepper tastes like carbonated cough syrup",
+      "source_chat_ids": ["chat_987"],
       "source": "embed",
       "rerank_score": 0.028,
       "time_info": "2025-12-05",
@@ -339,6 +354,7 @@ curl -X POST "http://localhost:8094/api/memory/search" \
     {
       "session_summary_id": 1,
       "session_id": 1,
+      "chat_id": "chat_987",
       "subject": "Debugging and beverages",
       "content": "Okabe and Amadeus discussed his habit of drinking Dr. Pepper while debugging. Amadeus teased him while secretly approving.",
       "score": 14.2,

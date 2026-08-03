@@ -72,6 +72,8 @@ def _write_task(spec: TaskSpec, ds: DatasetModel, session: Session) -> None:
     for s in spec.sessions:
         cs = ChatSessionModel(
             task_id=task.id,
+            # 评测数据没有外部聊天 ID，使用任务与会话序号生成稳定来源标识。
+            chat_id=f"{spec.task_id}:{s.session_number}",
             session_number=s.session_number,
             session_time=s.session_time,
             session_time_raw=s.session_time_raw,

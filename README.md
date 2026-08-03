@@ -32,6 +32,7 @@ POST /api/memory
 {
   "dataset": "user_123",
   "task": "persona_alice",
+  "chat_id": "chat_987",
   "messages": [
     {
       "speaker": "User",
@@ -47,6 +48,7 @@ POST /api/memory
 关键字段：
 
 - `dataset` / `task`：记忆隔离键，建议按用户和角色空间稳定生成。
+- `chat_id`：外部应用的聊天 ID，用于标记本次写入产生的消息、事实和会话摘要。
 - `messages`：待写入消息。
 - `store`：保存原始消息。
 - `digest`：触发后台记忆构建。
@@ -108,6 +110,11 @@ POST /api/memory/search
 - `strategy="rrf"`：无需 rerank 服务。
 - `strategy="rerank"`：调用 rerank 服务重排候选事实。
 
+检索接口不接收 `chat_id`，始终在当前 `dataset + task` 的全部记忆中检索。
+当前会话或跨会话的取舍由下游根据 `facts[*].source_chat_ids` 判断。
+`packed_context` 仍包含全量召回内容；下游筛选后应使用结构化 `facts` 和
+`sessions` 重建需要注入模型的上下文。
+
 核心响应字段：
 
 - `packed_context`：给 Chatbot 注入 prompt 的最终记忆上下文。
@@ -128,6 +135,7 @@ POST /api/memory/search
     {
       "fact_id": 1,
       "text": "User usually drinks Dr. Pepper while debugging",
+      "source_chat_ids": ["chat_987"],
       "source": "bm25",
       "rerank_score": 0.91,
       "time_info": "2026-04-26",
@@ -139,6 +147,7 @@ POST /api/memory/search
     {
       "session_summary_id": 1,
       "session_id": 1,
+      "chat_id": "chat_987",
       "subject": "Debugging and beverages",
       "content": "Alice talked about drinking Dr. Pepper while debugging.",
       "score": 0.82,
@@ -154,6 +163,7 @@ POST /api/memory/search
 
 - `fact_id`：事实 ID。
 - `text`：事实文本，实体引用已尽量解析为可读文本。
+- `source_chat_ids`：支持该事实的全部外部聊天 ID；下游可据此实现当前会话或跨会话业务规则。
 - `source`：命中的检索路径，常见值包括 `"bm25"`、`"embed"`、`"tree"`、`"bm25_parsed"`。
 - `rerank_score`：融合或 rerank 后的相关性分数。
 - `time_info`：事实关联时间。
@@ -164,6 +174,7 @@ POST /api/memory/search
 
 - `session_summary_id`：会话摘要 ID。
 - `session_id`：原始会话 ID。
+- `chat_id`：该内部会话所属的外部聊天 ID。
 - `subject`：会话主题。
 - `content`：会话摘要内容。
 - `score`：会话相关性分数。
@@ -181,9 +192,9 @@ task    = persona_<persona_id>
 
 典型流程：
 
-1. 用户和助手消息落库后调用 `POST /api/memory`，使用 `store=true, digest=true`。
+1. 用户和助手消息落库后调用 `POST /api/memory`，传入当前 `chat_id` 并使用 `store=true, digest=true`。
 2. 回复前由上层 router 判断是否需要回忆。
-3. 需要回忆时调用 `POST /api/memory/search`，把 `packed_context` 注入回复 agent。
+3. 需要回忆时调用 `POST /api/memory/search`，下游按 `source_chat_ids` 应用会话范围规则，再把所需记忆注入回复 agent。
 
 ## 3. Docker 部署
 

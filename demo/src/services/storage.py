@@ -376,7 +376,16 @@ async def count_user_turns_since(persona_id: str, since_at: datetime | None) -> 
 async def get_messages_since(
     persona_id: str, since_at: datetime | None, lookback: int = 0
 ) -> list[dict]:
-    """Messages across persona's sessions after since_at, plus up to `lookback` messages before cursor as context."""
+    """读取人格全部聊天中游标前后的消息。
+
+    Args:
+        persona_id: 消息所属人格 ID。
+        since_at: 增量消息的起始时间，None 表示从最早消息开始。
+        lookback: 额外返回的游标前上下文消息数。
+
+    Returns:
+        list[dict]: 按时间排序且保留外部聊天 ID 的消息。
+    """
     async with db_session() as db:
         base = (
             select(MessageModel)
@@ -400,6 +409,11 @@ async def get_messages_since(
         new_result = await db.execute(new_q.limit(200))
 
         return [
-            {"role": m.role, "content": m.content, "created_at": m.created_at}
+            {
+                "session_id": m.session_id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at,
+            }
             for m in prefix + list(new_result.scalars().all())
         ]

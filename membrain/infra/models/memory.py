@@ -69,6 +69,26 @@ class FactModel(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class FactSourceModel(Base):
+    """关联事实与产生该事实的原始会话。"""
+
+    __tablename__ = "fact_sources"
+    __table_args__ = ({"info": {"per_task": True}},)
+
+    fact_id = Column(
+        Integer,
+        ForeignKey("facts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    session_id = Column(
+        Integer,
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    fact = relationship("FactModel")
+
+
 class FactRefModel(Base):
     __tablename__ = "fact_refs"
     __table_args__ = (

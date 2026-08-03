@@ -280,6 +280,12 @@ def _create_memory_indexes(conn, schema: str) -> None:
         )
     )
     conn.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS {s}__ix_fact_sources_session "
+            "ON fact_sources (session_id)"
+        )
+    )
+    conn.execute(
         text(f"CREATE INDEX IF NOT EXISTS {s}__ix_facts_batch_id ON facts (batch_id)")
     )
     # HNSW vector indexes (columns are halfvec; inner-product for normalized vectors)
@@ -330,6 +336,16 @@ def init_memory_db() -> None:
                 "ADD COLUMN IF NOT EXISTS agent_profile VARCHAR(64) NULL"
             )
         )
+        # 不保留无来源会话：已有数据未提供 chat_id 时应由部署方清理后再升级。
+        conn.execute(
+            text(
+                "ALTER TABLE chat_sessions "
+                "ADD COLUMN IF NOT EXISTS chat_id VARCHAR(255) NULL"
+            )
+        )
+        conn.execute(
+            text("ALTER TABLE chat_sessions ALTER COLUMN chat_id SET NOT NULL")
+        )
         conn.commit()
 
     with engine.connect() as conn:
@@ -345,6 +361,12 @@ def init_memory_db() -> None:
             text(
                 "CREATE INDEX IF NOT EXISTS ix_chat_sessions_task_id "
                 "ON chat_sessions (task_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_sessions_task_chat_id "
+                "ON chat_sessions (task_id, chat_id)"
             )
         )
         conn.execute(

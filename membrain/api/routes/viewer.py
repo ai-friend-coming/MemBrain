@@ -15,10 +15,9 @@ from __future__ import annotations
 import json as _json
 import logging
 from collections import defaultdict
-from pathlib import Path
 from typing import Generator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
@@ -57,6 +56,7 @@ _logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["viewer"])
 
+# 运行标签会用于拼接 PostgreSQL schema 名，因此只允许安全字符。
 _RUN_TAG_PATH = Path(pattern=r"^[a-zA-Z0-9_]+$")
 
 

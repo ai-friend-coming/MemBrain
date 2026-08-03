@@ -36,7 +36,6 @@ from membrain.infra.retrieval.aspect_enrichment import (
     enrich_for_rerank,
 )
 from membrain.infra.retrieval.fact_retrieval import (
-    _ENTITY_BRACKET_RE,
     _resolve_entity_refs,
     bm25_search_facts,
     bm25_search_sessions,
@@ -150,7 +149,7 @@ def _bm25_parsed_search_sessions(
         return []
     sql = sa_text("""
         SELECT ss.id, ss.session_id, ss.subject, ss.content,
-               pdb.score(ss.id) AS score, cs.session_number
+               pdb.score(ss.id) AS score, cs.session_number, cs.chat_id
         FROM session_summaries ss
         LEFT JOIN chat_sessions cs ON cs.id = ss.session_id
         WHERE ss.id @@@ pdb.parse(:query, lenient => true)
@@ -171,6 +170,7 @@ def _bm25_parsed_search_sessions(
         RetrievedSession(
             session_summary_id=r[0],
             session_id=r[1],
+            chat_id=r[6],
             subject=r[2] or "",
             content=r[3],
             score=r[4],
@@ -236,32 +236,57 @@ def _inject_session_numbers(pool: list[RetrievedFact], db: Session) -> None:
         fact.session_number = sn_map.get(fact.fact_id)
 
 
+def _inject_source_chat_ids(pool: list[RetrievedFact], db: Session) -> None:
+    """补充每条事实关联的全部外部聊天 ID。"""
+    if not pool:
+        return
+    fact_ids = [fact.fact_id for fact in pool]
+    rows = db.execute(
+        sa_text("""
+            SELECT fs.fact_id,
+                   array_agg(DISTINCT cs.chat_id ORDER BY cs.chat_id) AS chat_ids
+            FROM fact_sources fs
+            JOIN chat_sessions cs ON cs.id = fs.session_id
+            WHERE fs.fact_id = ANY(:ids)
+            GROUP BY fs.fact_id
+        """),
+        {"ids": fact_ids},
+    ).fetchall()
+    chat_ids_by_fact = {row[0]: list(row[1]) for row in rows}
+    for fact in pool:
+        fact.source_chat_ids = chat_ids_by_fact.get(fact.fact_id, [])
+
+
 def _resolve_pool_entity_refs(
     pool: list[RetrievedFact],
     db: Session,
 ) -> None:
-    all_aliases: set[str] = set()
-    for fact in pool:
-        for alias in _ENTITY_BRACKET_RE.findall(fact.text):
-            all_aliases.add(alias)
-    if not all_aliases:
+    """按事实绑定的稳定实体解析文本中的别名引用。
+
+    Args:
+        pool: 待返回的事实列表。
+        db: 当前任务 schema 的数据库会话。
+    """
+    fact_ids = [fact.fact_id for fact in pool]
+    if not fact_ids:
         return
     rows = db.execute(
         sa_text("""
-            SELECT DISTINCT ON (fr.alias_text)
-                   fr.alias_text, e.canonical_ref
+            SELECT fr.fact_id, fr.alias_text, e.canonical_ref
             FROM fact_refs fr
             JOIN entities e ON e.entity_id = fr.entity_id
-            WHERE fr.alias_text = ANY(:texts)
-            ORDER BY fr.alias_text
+            WHERE fr.fact_id = ANY(:ids)
         """),
-        {"texts": list(all_aliases)},
+        {"ids": fact_ids},
     ).fetchall()
-    alias_canonical = {r[0]: r[1] for r in rows}
-    if not alias_canonical:
-        return
+    aliases_by_fact: dict[int, dict[str, str]] = {}
+    for fact_id, alias, canonical_ref in rows:
+        aliases_by_fact.setdefault(fact_id, {})[alias] = canonical_ref
     for fact in pool:
-        fact.text = _resolve_entity_refs(fact.text, alias_canonical)
+        fact.text = _resolve_entity_refs(
+            fact.text,
+            aliases_by_fact.get(fact.fact_id, {}),
+        )
 
 
 # ── Agentic round 2 ─────────────────────────────────────────────────────────
@@ -341,17 +366,20 @@ def search(
     strategy: Literal["rrf", "rerank"] = "rrf",
     mode: Literal["direct", "expand", "reflect"] = "expand",
 ) -> dict:
-    """Multi-path retrieval with pluggable fusion strategy.
+    """执行多路记忆召回并为结果补充聊天来源。
 
-    mode="direct"  — 3-path (A+B+C), no LLM query rewriting
-    mode="expand"  — 6-path (A+B+B2+B3+C+D) with LLM query expansion (default)
-    mode="reflect" — 6-path + agentic round-2 reflect-and-refine
+    Args:
+        question: 用户当前问题。
+        task_id: 需要检索的任务主键。
+        db: 已切换到任务 schema 的数据库会话。
+        embed_client: 查询向量客户端。
+        http_client: 查询改写使用的 HTTP 客户端。
+        top_k: 融合后保留的事实数量。
+        strategy: 候选融合策略。
+        mode: 查询扩展模式。
 
-    strategy="rrf"    — Reciprocal Rank Fusion (default)
-    strategy="rerank" — Cross-encoder reranking
-
-    Returns dict with keys: packed_context, packed_token_count,
-    fact_ids, facts, sessions, raw_messages.
+    Returns:
+        dict: 包含上下文、事实、来源聊天 ID 和会话摘要的检索结果。
     """
     # ── 1. Query rewrite + multi-query expansion ─────────────────────────
     if mode == "direct":
@@ -503,6 +531,7 @@ def search(
     # Resolve entity bracket refs on the final selected facts so that the
     # first occurrence in the output gets the description appended.
     _resolve_pool_entity_refs(round1_facts, db)
+    _inject_source_chat_ids(round1_facts, db)
 
     # ── 7. Session retrieval ──────────────────────────────────────────────
     seen_sess: dict[int, RetrievedSession] = {}
@@ -540,6 +569,7 @@ def search(
             {
                 "fact_id": f.fact_id,
                 "text": f.text,
+                "source_chat_ids": f.source_chat_ids,
                 "source": f.source,
                 "rerank_score": f.rerank_score,
                 "time_info": f.time_info,
@@ -552,6 +582,7 @@ def search(
             {
                 "session_summary_id": s.session_summary_id,
                 "session_id": s.session_id,
+                "chat_id": s.chat_id,
                 "subject": s.subject,
                 "content": s.content,
                 "score": s.score,

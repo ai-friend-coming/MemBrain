@@ -40,13 +40,23 @@ class MembrainClient:
         self,
         owner_id: str,
         persona_id: str,
+        chat_id: str,
         messages: list[dict],
         user_alias: str,
         character_name: str,
     ) -> bool:
-        """POST /api/memory — fire-and-forget, never raises.
+        """将单个外部聊天的消息推送到 MemBrain。
 
-        Returns True on success, False on failure.
+        Args:
+            owner_id: 记忆所属用户 ID。
+            persona_id: 记忆所属人格 ID。
+            chat_id: 外部聊天 ID。
+            messages: 待推送的聊天消息。
+            user_alias: 用户在事实中的显示名。
+            character_name: 角色在事实中的显示名。
+
+        Returns:
+            bool: 推送成功时返回 True，否则返回 False。
         """
         if self._base_url is None:
             return True
@@ -67,6 +77,7 @@ class MembrainClient:
         payload = {
             "dataset": f"user_{owner_id}",
             "task": f"persona_{persona_id}",
+            "chat_id": chat_id,
             "messages": mb_messages,
             "store": True,
             "digest": True,

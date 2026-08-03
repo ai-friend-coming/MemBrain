@@ -13,6 +13,8 @@ from membrain.infra.models.memory import (
     EntityModel,
     FactModel,
     FactRefModel,
+    FactSourceModel,
+    FactStatus,
     TimeAnnotationModel,
 )
 
@@ -103,9 +105,21 @@ def write_batch_results(
     batch_index: int | None = None,
     session_number: int | None = None,
 ) -> dict[str, str]:
-    """Write memory pipeline results atomically (3 flushes).
+    """原子写入抽取结果、实体引用与事实来源。
 
-    Returns updated ref_to_entity_id.
+    Args:
+        db: 当前任务 schema 的数据库会话。
+        task_id: 事实所属任务主键。
+        batch_id: 当前抽取批次 ID。
+        facts: 本批次抽取出的事实。
+        decisions: 实体创建或合并决策。
+        embed_client: 事实和实体使用的向量客户端。
+        ref_to_entity_id: 实体引用到内部实体 ID 的映射。
+        batch_index: 当前批次序号。
+        session_number: 事实来源的内部会话序号。
+
+    Returns:
+        dict[str, str]: 更新后的实体引用映射。
     """
     entity_id_to_canonical: dict[str, str] = {}
 
@@ -213,41 +227,124 @@ def write_batch_results(
         for eid, ent in targets.items():
             entity_id_to_canonical[eid] = ent.canonical_ref
 
+    # 每个 API 写入批次先落为内部 session，事实来源关系复用该稳定主键。
+    source_session_id: int | None = None
+    if session_number is not None:
+        from membrain.infra.models.dataset import ChatSessionModel
+
+        source_session_id = (
+            db.query(ChatSessionModel.id)
+            .filter(
+                ChatSessionModel.task_id == task_id,
+                ChatSessionModel.session_number == session_number,
+            )
+            .scalar()
+        )
+        if source_session_id is None:
+            raise RuntimeError(
+                f"未找到事实来源会话: task_id={task_id}, session_number={session_number}"
+            )
+
+    # fact_ts 是来源消息时间；事实的语义时间已编码在文本的时间标记中。
+    fact_keys = list(dict.fromkeys(fact["text"] for fact in facts))
+    equivalent_fact_ids = list(
+        dict.fromkeys(
+            fact["_equivalent_fact_id"]
+            for fact in facts
+            if fact.get("_equivalent_fact_id") is not None
+        )
+    )
+    equivalent_by_id: dict[int, FactModel] = {}
+    if equivalent_fact_ids:
+        equivalent_by_id = {
+            row.id: row
+            for row in db.query(FactModel)
+            .filter(
+                FactModel.task_id == task_id,
+                FactModel.status == FactStatus.ACTIVE,
+                FactModel.id.in_(equivalent_fact_ids),
+            )
+            .all()
+        }
+
+    # 复用 ID 已由上游同时校验文本语义和稳定实体身份。
+    existing_by_key: dict[str, FactModel] = {}
+    for fact in facts:
+        matched = equivalent_by_id.get(fact.get("_equivalent_fact_id"))
+        if matched is not None:
+            existing_by_key.setdefault(fact["text"], matched)
+
+    new_fact_items: list[tuple[str, dict]] = []
+    new_keys: set[str] = set()
+    for fact_dict in facts:
+        key = fact_dict["text"]
+        if key not in existing_by_key and key not in new_keys:
+            new_keys.add(key)
+            new_fact_items.append((key, fact_dict))
+
+    new_fact_texts = [fact["text"] for _, fact in new_fact_items]
     try:
-        fact_vecs = embed_client.embed(fact_texts) if fact_texts else []
+        fact_vecs = embed_client.embed(new_fact_texts) if new_fact_texts else []
     except Exception:
         log.warning(
-            "Embedding failed for %d facts, storing without vectors", len(fact_texts)
+            "Embedding failed for %d facts, storing without vectors",
+            len(new_fact_texts),
         )
         fact_vecs = []
 
-    # ── Phase 2: Facts → 1 flush ──
+    # ── Phase 2: 新事实写入，已存在的事实只追加来源关系 ──
     fact_models: list[FactModel] = []
-    for i, fact_dict in enumerate(facts):
-        fm = FactModel(
+    new_by_key: dict[str, FactModel] = {}
+    for index, (key, fact_dict) in enumerate(new_fact_items):
+        fact_model = FactModel(
             task_id=task_id,
             text=fact_dict["text"],
-            text_embedding=fact_vecs[i] if i < len(fact_vecs) else None,
+            text_embedding=fact_vecs[index] if index < len(fact_vecs) else None,
             batch_id=batch_id,
             session_number=session_number,
             batch_index=batch_index,
             fact_ts=fact_dict.get("fact_ts"),
         )
-        fact_models.append(fm)
+        new_by_key[key] = fact_model
+        fact_models.append(fact_model)
+
     if fact_models:
         db.add_all(fact_models)
-        db.flush()  # flush 2: all fact IDs
+        db.flush()  # 新事实先取得主键，随后建立来源关系。
+
+    target_by_key = {**new_by_key, **existing_by_key}
+    source_targets: list[FactModel] = []
+    if source_session_id is not None:
+        for key in fact_keys:
+            source_targets.append(target_by_key[key])
 
     # ── Phase 3: FactRefs + search_text + TimeAnnotations → 1 flush ──
-    fact_ref_models: list[FactRefModel] = []
-    for fm in fact_models:
-        bracket_refs = _extract_bracket_refs(fm.text)
-        for br in bracket_refs:
-            eid = ref_to_entity_id.get(br)
-            if eid:
-                fact_ref_models.append(
-                    FactRefModel(fact_id=fm.id, entity_id=eid, alias_text=br)
-                )
+    fact_ref_keys = list(
+        dict.fromkeys(
+            (target_by_key[fact["text"]].id, ref_to_entity_id[ref], ref)
+            for fact in facts
+            for ref in _extract_bracket_refs(fact["text"])
+            if ref in ref_to_entity_id
+        )
+    )
+    existing_fact_refs: set[tuple[int, str, str]] = set()
+    if fact_ref_keys:
+        target_fact_ids = [fact_id for fact_id, _, _ in fact_ref_keys]
+        existing_fact_refs = {
+            (fact_id, entity_id, alias_text)
+            for fact_id, entity_id, alias_text in db.query(
+                FactRefModel.fact_id,
+                FactRefModel.entity_id,
+                FactRefModel.alias_text,
+            )
+            .filter(FactRefModel.fact_id.in_(target_fact_ids))
+            .all()
+        }
+    fact_ref_models = [
+        FactRefModel(fact_id=fact_id, entity_id=entity_id, alias_text=alias_text)
+        for fact_id, entity_id, alias_text in fact_ref_keys
+        if (fact_id, entity_id, alias_text) not in existing_fact_refs
+    ]
 
     # Populate search_text with canonical entity refs (in-memory)
     for fm in fact_models:
@@ -274,7 +371,41 @@ def write_batch_results(
                 )
             )
 
-    db.add_all(fact_ref_models + time_models)
-    db.flush()  # flush 3: fact_refs + search_text + time_annotations
+    source_pairs = (
+        list(
+            dict.fromkeys(
+                (
+                    target.id,
+                    source_session_id,
+                )
+                for target in source_targets
+            )
+        )
+        if source_session_id is not None
+        else []
+    )
+    existing_source_pairs: set[tuple[int, int]] = set()
+    if source_pairs:
+        source_fact_ids = [fact_id for fact_id, _ in source_pairs]
+        existing_source_pairs = {
+            (fact_id, session_id)
+            for fact_id, session_id in db.query(
+                FactSourceModel.fact_id,
+                FactSourceModel.session_id,
+            )
+            .filter(
+                FactSourceModel.fact_id.in_(source_fact_ids),
+                FactSourceModel.session_id == source_session_id,
+            )
+            .all()
+        }
+    fact_source_models = [
+        FactSourceModel(fact_id=fact_id, session_id=session_id)
+        for fact_id, session_id in source_pairs
+        if (fact_id, session_id) not in existing_source_pairs
+    ]
+
+    db.add_all(fact_ref_models + time_models + fact_source_models)
+    db.flush()  # 来源关系必须与事实一起提交，避免出现无法溯源的记忆。
 
     return ref_to_entity_id

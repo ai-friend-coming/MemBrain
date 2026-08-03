@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ── Shared ──────────────────────────────────────────────────────────────────
 
@@ -24,8 +24,11 @@ class MessageIn(BaseModel):
 
 
 class MemoryRequest(BaseModel):
+    """接收带外部聊天来源的记忆写入参数。"""
+
     dataset: str
     task: str
+    chat_id: str = Field(min_length=1, max_length=255)
     messages: list[MessageIn] = []
     session_time: str = ""
     store: bool = True
@@ -55,8 +58,11 @@ class MemorySearchRequest(BaseModel):
 
 
 class RetrievedFactOut(BaseModel):
+    """返回事实内容及其全部外部聊天来源。"""
+
     fact_id: int
     text: str
+    source_chat_ids: list[str]
     source: str
     rerank_score: float = 0.0
     time_info: str = ""
@@ -65,8 +71,11 @@ class RetrievedFactOut(BaseModel):
 
 
 class RetrievedSessionOut(BaseModel):
+    """返回会话摘要及其唯一外部聊天来源。"""
+
     session_summary_id: int
     session_id: int
+    chat_id: str
     subject: str
     content: str
     score: float
@@ -75,8 +84,11 @@ class RetrievedSessionOut(BaseModel):
 
 
 class RetrievedMessageOut(BaseModel):
+    """返回原始消息及其唯一外部聊天来源。"""
+
     message_id: int
     session_id: int
+    chat_id: str
     speaker: str
     content: str
     message_time: str

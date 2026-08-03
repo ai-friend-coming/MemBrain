@@ -247,6 +247,7 @@ def clear_ingestion_tables(task_pk: int, run_tag: str) -> None:
             "entity_tree_nodes",
             "fact_refs",
             "time_annotations",
+            "fact_sources",
             "facts",
             "entities",
         ]
@@ -330,6 +331,7 @@ def copy_run(old_run_tag: str, new_run_tag: str) -> tuple[int, list[str]]:
                         "session_summaries",
                         "entities",
                         "facts",
+                        "fact_sources",
                         "fact_refs",
                         "time_annotations",
                     ):

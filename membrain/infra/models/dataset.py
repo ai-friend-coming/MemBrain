@@ -46,6 +46,8 @@ class TaskModel(Base):
 
 
 class ChatSessionModel(Base):
+    """保存一次内部会话及其外部聊天来源。"""
+
     __tablename__ = "chat_sessions"
     __table_args__ = (
         UniqueConstraint("task_id", "session_number", name="uq_session_task_number"),
@@ -55,6 +57,7 @@ class ChatSessionModel(Base):
     task_id = Column(
         Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
     )
+    chat_id = Column(String(255), nullable=False, index=True)
     session_number = Column(Integer, nullable=False)
     session_time = Column(DateTime, nullable=True)
     session_time_raw = Column(String(255))

@@ -140,28 +140,28 @@ async def _run_digest(task_pk: int, agent_profile: str | None) -> None:
                 .all()
             )
             pending = list(pending)
-            for s in pending:
-                db.expunge(s)
+            for session in pending:
+                db.expunge(session)
 
         if not pending:
             return
 
         workflow = task_mgr.get_or_create(task_pk)
         try:
-            for sess in pending:
-                sess_messages = _load_session_messages(sess.id)
-                if not sess_messages:
-                    _mark_digested(sess.id)
+            for session in pending:
+                session_messages = _load_session_messages(session.id)
+                if not session_messages:
+                    _mark_digested(session.id)
                     continue
                 await workflow.process_session(
                     task_pk=task_pk,
-                    messages=sess_messages,
-                    session_number=sess.session_number,
-                    session_pk=sess.id,
-                    session_time=sess.session_time_raw or "",
+                    messages=session_messages,
+                    session_number=session.session_number,
+                    session_pk=session.id,
+                    session_time=session.session_time_raw or "",
                     profile=agent_profile,
                 )
-                _mark_digested(sess.id)
+                _mark_digested(session.id)
         except Exception:
             log.exception("background digest failed task_pk=%s", task_pk)
         finally:
@@ -173,12 +173,13 @@ async def _run_digest(task_pk: int, agent_profile: str | None) -> None:
 
 @router.post("/memory", response_model=MemoryResponse)
 async def process_memory(req: MemoryRequest):
-    """Unified memory endpoint.
+    """存储带聊天来源的消息并按需触发后台记忆抽取。
 
-    Modes (controlled by ``store`` and ``digest``):
-      store=True,  digest=False  — save raw messages only
-      store=True,  digest=True   — save then digest all pending sessions
-      store=False, digest=True   — digest all pending sessions (no new data)
+    Args:
+        req: 包含必填 chat_id、消息和存储模式的请求参数。
+
+    Returns:
+        MemoryResponse: 新建内部会话及后台处理状态。
     """
     messages = [m.model_dump() for m in req.messages]
 
@@ -222,6 +223,7 @@ async def process_memory(req: MemoryRequest):
 
             session = ChatSessionModel(
                 task_id=task_pk,
+                chat_id=req.chat_id,
                 session_number=session_number,
                 session_time=session_dt,
                 session_time_raw=req.session_time or None,

@@ -10,11 +10,13 @@ can both import from a neutral location without either depending on the other.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
 class RetrievedFact:
+    """承载事实召回内容、排序信息与全部聊天来源。"""
+
     fact_id: int
     text: str
     source: str  # "bm25" | "embed" | "tree"
@@ -26,12 +28,16 @@ class RetrievedFact:
     aspect_path: str = ""
     aspect_summary: str = ""
     session_number: int | None = None
+    source_chat_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
 class RetrievedMessage:
+    """承载原始消息召回内容及其聊天来源。"""
+
     message_id: int
     session_id: int
+    chat_id: str
     speaker: str
     content: str
     message_time: str  # ISO-formatted datetime string
@@ -41,8 +47,11 @@ class RetrievedMessage:
 
 @dataclass
 class RetrievedSession:
+    """承载会话摘要召回内容及其聊天来源。"""
+
     session_summary_id: int
     session_id: int
+    chat_id: str
     subject: str
     content: str
     score: float

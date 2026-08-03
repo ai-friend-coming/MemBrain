@@ -70,15 +70,30 @@ async def _push_and_track_cursor(
     persona: PersonaModel,
     messages: list[dict],
 ) -> None:
-    """Push messages to MemBrain and advance membrain_cursor_at on success."""
-    success = await membrain.push_conversation(
-        owner_id=persona.owner_id,
-        persona_id=persona.id,
-        messages=messages,
-        user_alias=persona.user_alias,
-        character_name=persona.character_name,
-    )
-    if success and messages:
+    """按外部聊天分组推送消息，并在全部成功后推进游标。
+
+    Args:
+        membrain: MemBrain HTTP 客户端。
+        persona: 消息所属人格。
+        messages: 可能跨多个聊天的待推送消息。
+    """
+    messages_by_chat: dict[str, list[dict]] = {}
+    for message in messages:
+        messages_by_chat.setdefault(message["session_id"], []).append(message)
+
+    for chat_id, chat_messages in messages_by_chat.items():
+        success = await membrain.push_conversation(
+            owner_id=persona.owner_id,
+            persona_id=persona.id,
+            chat_id=chat_id,
+            messages=chat_messages,
+            user_alias=persona.user_alias,
+            character_name=persona.character_name,
+        )
+        if not success:
+            return
+
+    if messages:
         up_to = messages[-1]["created_at"]
         async with db_session() as db:
             await db.execute(

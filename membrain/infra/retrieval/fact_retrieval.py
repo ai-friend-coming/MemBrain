@@ -279,16 +279,24 @@ def bm25_search_messages(
     limit: int = settings.QA_BM25_MSG_TOP_N,
     speaker: str | None = None,
 ) -> list[RetrievedMessage]:
-    """Search raw chat_messages content using BM25, filtered by task_id.
+    """检索当前任务的原始聊天消息并保留外部聊天来源。
 
-    Pass ``speaker="assistant"`` to restrict to assistant messages only.
+    Args:
+        query: BM25 查询文本。
+        task_id: 消息所属任务主键。
+        db: 当前数据库会话。
+        limit: 最多返回的消息数。
+        speaker: 可选的发言者过滤条件。
+
+    Returns:
+        list[RetrievedMessage]: 按相关性排序的消息及其 chat_id。
     """
     safe_query = _sanitize_bm25_query(query)
     if not safe_query:
         return []
     speaker_filter = "AND cm.speaker = :speaker" if speaker else ""
     sql = sa_text(f"""
-        SELECT cm.id, cm.session_id, cm.speaker, cm.content, cm.message_time,
+        SELECT cm.id, cm.session_id, cs.chat_id, cm.speaker, cm.content, cm.message_time,
                paradedb.score(cm.id) AS score
         FROM chat_messages cm
         JOIN chat_sessions cs ON cs.id = cm.session_id
@@ -314,15 +322,16 @@ def bm25_search_messages(
         return []
     results = []
     for r in rows:
-        msg_time = r[4].isoformat() if r[4] else ""
+        msg_time = r[5].isoformat() if r[5] else ""
         results.append(
             RetrievedMessage(
                 message_id=r[0],
                 session_id=r[1],
-                speaker=r[2],
-                content=r[3],
+                chat_id=r[2],
+                speaker=r[3],
+                content=r[4],
                 message_time=msg_time,
-                bm25_score=float(r[5]),
+                bm25_score=float(r[6]),
                 query=query,
             )
         )
@@ -338,13 +347,23 @@ def bm25_search_sessions(
     db: Session,
     limit: int = settings.QA_SESSION_BM25_TOP_N,
 ) -> list[RetrievedSession]:
-    """BM25 search on session_summaries.content."""
+    """检索当前任务的会话摘要并保留外部聊天来源。
+
+    Args:
+        query: BM25 查询文本。
+        task_id: 会话摘要所属任务主键。
+        db: 当前数据库会话。
+        limit: 最多返回的摘要数。
+
+    Returns:
+        list[RetrievedSession]: 按相关性排序的摘要及其 chat_id。
+    """
     safe_query = _sanitize_bm25_query(query)
     if not safe_query:
         return []
     sql = sa_text("""
         SELECT ss.id, ss.session_id, ss.subject, ss.content, pdb.score(ss.id) AS score,
-               cs.session_number
+               cs.session_number, cs.chat_id
         FROM session_summaries ss
         LEFT JOIN chat_sessions cs ON cs.id = ss.session_id
         WHERE ss.content ||| :query
@@ -364,6 +383,7 @@ def bm25_search_sessions(
         RetrievedSession(
             session_summary_id=r[0],
             session_id=r[1],
+            chat_id=r[6],
             subject=r[2],
             content=r[3],
             score=r[4],
@@ -380,9 +400,16 @@ def aggregate_session_scores(
     db: Session,
     limit: int = settings.QA_SESSION_FINAL_TOP_N,
 ) -> list[RetrievedSession]:
-    """Score sessions by aggregating rerank scores of their constituent facts.
+    """按命中事实的全部来源会话聚合会话摘要分数。
 
-    Path: facts.session_number → session_summaries.
+    Args:
+        facts: 已排序的命中事实。
+        task_id: 会话所属任务主键。
+        db: 已切换到任务 schema 的数据库会话。
+        limit: 最多返回的会话摘要数量。
+
+    Returns:
+        list[RetrievedSession]: 按聚合分数倒序排列的会话摘要。
     """
     if not facts:
         return []
@@ -390,35 +417,36 @@ def aggregate_session_scores(
     fact_ids = [f.fact_id for f in facts]
     score_by_fid = {f.fact_id: f.rerank_score for f in facts}
 
-    # Direct column read: session_number is now stored on facts
+    # 一条事实可由多个会话共同支持，每个来源会话都应获得该事实的分数。
     mapping_sql = sa_text("""
-        SELECT id, session_number
-        FROM facts
-        WHERE id = ANY(:fact_ids)
-          AND session_number IS NOT NULL
-          AND status = 'active'
+        SELECT fs.fact_id, fs.session_id
+        FROM fact_sources fs
+        JOIN facts f ON f.id = fs.fact_id
+        JOIN chat_sessions cs ON cs.id = fs.session_id
+        WHERE fs.fact_id = ANY(:fact_ids)
+          AND f.status = 'active'
+          AND cs.task_id = :task_id
     """)
     mapping_rows = db.execute(
         mapping_sql,
-        {"fact_ids": fact_ids},
+        {"fact_ids": fact_ids, "task_id": task_id},
     ).fetchall()
 
     if not mapping_rows:
         return []
 
-    # Aggregate scores by session_number
     sess_score: dict[int, float] = defaultdict(float)
     sess_count: dict[int, int] = defaultdict(int)
-    for fid, sn in mapping_rows:
-        sess_score[sn] += score_by_fid.get(fid, 0.0)
-        sess_count[sn] += 1
+    for fact_id, session_id in mapping_rows:
+        sess_score[session_id] += score_by_fid.get(fact_id, 0.0)
+        sess_count[session_id] += 1
 
     # Fetch session_summaries for the top sessions
     from membrain.infra.models.dataset import ChatSessionModel
     from membrain.infra.models.memory import SessionSummaryModel
 
-    ranked_sessions = sorted(sess_score.items(), key=lambda x: x[1], reverse=True)
-    top_sess_nums = [sn for sn, _ in ranked_sessions[: limit * 2]]
+    ranked_sessions = sorted(sess_score.items(), key=lambda item: item[1], reverse=True)
+    top_session_ids = [session_id for session_id, _ in ranked_sessions[: limit * 2]]
 
     rows = (
         db.query(
@@ -427,28 +455,30 @@ def aggregate_session_scores(
             SessionSummaryModel.subject,
             SessionSummaryModel.content,
             ChatSessionModel.session_number,
+            ChatSessionModel.chat_id,
         )
         .join(ChatSessionModel, SessionSummaryModel.session_id == ChatSessionModel.id)
         .filter(
             SessionSummaryModel.task_id == task_id,
-            ChatSessionModel.session_number.in_(top_sess_nums),
+            SessionSummaryModel.session_id.in_(top_session_ids),
         )
         .all()
     )
 
     results = []
     for r in rows:
-        sn = r[4]
+        session_id = r[1]
         results.append(
             RetrievedSession(
                 session_summary_id=r[0],
                 session_id=r[1],
+                chat_id=r[5],
                 subject=r[2],
                 content=r[3],
-                score=sess_score.get(sn, 0.0),
+                score=sess_score.get(session_id, 0.0),
                 source="fact_agg",
-                contributing_facts=sess_count.get(sn, 0),
-                session_number=sn,
+                contributing_facts=sess_count.get(session_id, 0),
+                session_number=r[4],
             )
         )
 

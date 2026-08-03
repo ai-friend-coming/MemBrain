@@ -9,6 +9,7 @@ from membrain.infra.models.memory import (
     EntityTreeNodeModel,
     FactModel,
     FactRefModel,
+    FactSourceModel,
     SessionSummaryModel,
     TimeAnnotationModel,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "EntityTreeNodeModel",
     "FactModel",
     "FactRefModel",
+    "FactSourceModel",
     "SessionSummaryModel",
     "TimeAnnotationModel",
 ]
