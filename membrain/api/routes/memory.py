@@ -27,6 +27,7 @@ from membrain.api.schemas.memory import (
     RetrievedFactOut,
     RetrievedSessionOut,
 )
+from membrain.api.trace import finish_trace, start_trace
 from membrain.config import settings
 from membrain.infra.db import SessionLocal
 from membrain.infra.models.dataset import (
@@ -126,8 +127,18 @@ def _mark_digested(session_pk: int) -> None:
 _background_digest_tasks: set[asyncio.Task] = set()
 
 
-async def _run_digest(task_pk: int, agent_profile: str | None) -> None:
+async def _run_digest(task_pk: int, agent_profile: str | None) -> tuple[int, bool]:
+    """处理指定任务下的待 digest 会话并返回完成数量。
+
+    Args:
+        task_pk: 内部任务主键。
+        agent_profile: 任务级 Agent 画像。
+
+    Returns:
+        tuple[int, bool]: 本次完成数量以及是否未发生 digest 异常。
+    """
     set_current_task(str(task_pk))
+    digested_sessions = 0
     async with task_mgr.get_lock(task_pk):
         with SessionLocal() as db:
             pending = (
@@ -144,14 +155,16 @@ async def _run_digest(task_pk: int, agent_profile: str | None) -> None:
                 db.expunge(session)
 
         if not pending:
-            return
+            return 0, True
 
         workflow = task_mgr.get_or_create(task_pk)
+        succeeded = True
         try:
             for session in pending:
                 session_messages = _load_session_messages(session.id)
                 if not session_messages:
                     _mark_digested(session.id)
+                    digested_sessions += 1
                     continue
                 await workflow.process_session(
                     task_pk=task_pk,
@@ -162,10 +175,13 @@ async def _run_digest(task_pk: int, agent_profile: str | None) -> None:
                     profile=agent_profile,
                 )
                 _mark_digested(session.id)
+                digested_sessions += 1
         except Exception:
+            succeeded = False
             log.exception("background digest failed task_pk=%s", task_pk)
         finally:
             task_mgr.cleanup(task_pk)
+    return digested_sessions, succeeded
 
 
 # ── POST /api/memory ────────────────────────────────────────────────────────
@@ -173,107 +189,122 @@ async def _run_digest(task_pk: int, agent_profile: str | None) -> None:
 
 @router.post("/memory", response_model=MemoryResponse)
 async def process_memory(req: MemoryRequest):
-    """存储带聊天来源的消息并按需触发后台记忆抽取。
+    """存储带聊天来源的消息，并按需等待记忆抽取完成。
 
     Args:
         req: 包含必填 chat_id、消息和存储模式的请求参数。
 
     Returns:
-        MemoryResponse: 新建内部会话及后台处理状态。
+        MemoryResponse: 新建内部会话、digest 状态和当前请求 trace。
     """
-    messages = [m.model_dump() for m in req.messages]
+    trace, trace_token = start_trace()
+    try:
+        messages = [m.model_dump() for m in req.messages]
 
-    if req.store and not messages:
-        raise HTTPException(400, "messages required when store=True")
-    if not req.store and not req.digest:
-        raise HTTPException(400, "at least one of store or digest must be True")
+        if req.store and not messages:
+            raise HTTPException(400, "messages required when store=True")
+        if not req.store and not req.digest:
+            raise HTTPException(400, "at least one of store or digest must be True")
 
-    # ── Resolve dataset / task ───────────────────────────────────────
-    with SessionLocal() as db:
-        dataset, task = _get_or_create_dataset_task(
-            db,
-            req.dataset,
-            req.task,
-            req.agent_profile,
-        )
-        dataset_id = dataset.id
-        task_pk = task.id
-        agent_profile = task.agent_profile
-        db.commit()
-
-    # ── Store ────────────────────────────────────────────────────────
-    session_pk: int | None = None
-    session_number: int | None = None
-
-    if req.store:
+        # dataset 和 task 是事实、实体、会话摘要共同使用的隔离边界。
         with SessionLocal() as db:
-            max_sn = (
-                db.query(func.max(ChatSessionModel.session_number))
-                .filter_by(task_id=task_pk)
-                .scalar()
-            ) or 0
-            session_number = max_sn + 1
-
-            session_dt = None
-            if req.session_time:
-                try:
-                    session_dt = datetime.fromisoformat(req.session_time)
-                except ValueError:
-                    pass
-
-            session = ChatSessionModel(
-                task_id=task_pk,
-                chat_id=req.chat_id,
-                session_number=session_number,
-                session_time=session_dt,
-                session_time_raw=req.session_time or None,
-                digested_at=None,
+            dataset, task = _get_or_create_dataset_task(
+                db,
+                req.dataset,
+                req.task,
+                req.agent_profile,
             )
-            db.add(session)
-            db.flush()
-            session_pk = session.id
-
-            for pos, msg in enumerate(messages):
-                msg_dt = None
-                if msg.get("message_time"):
-                    try:
-                        msg_dt = datetime.fromisoformat(msg["message_time"])
-                    except ValueError:
-                        pass
-                db.add(
-                    ChatMessageModel(
-                        session_id=session_pk,
-                        position=pos,
-                        speaker=msg["speaker"],
-                        content=msg["content"],
-                        message_time=msg_dt,
-                        message_time_raw=msg.get("message_time") or None,
-                    )
-                )
+            dataset_id = dataset.id
+            task_pk = task.id
+            agent_profile = task.agent_profile
             db.commit()
 
-    # ── Digest (async background) ────────────────────────────────────
-    if req.digest:
-        t = asyncio.create_task(_run_digest(task_pk, agent_profile))
-        _background_digest_tasks.add(t)
-        t.add_done_callback(_background_digest_tasks.discard)
+        session_pk: int | None = None
+        session_number: int | None = None
 
-    # ── Response ─────────────────────────────────────────────────────
-    if req.store and req.digest:
-        status = "stored_and_digest_queued"
-    elif req.digest:
-        status = "digest_queued"
-    else:
-        status = "stored"
+        if req.store:
+            with SessionLocal() as db:
+                max_sn = (
+                    db.query(func.max(ChatSessionModel.session_number))
+                    .filter_by(task_id=task_pk)
+                    .scalar()
+                ) or 0
+                session_number = max_sn + 1
 
-    return MemoryResponse(
-        dataset_id=dataset_id,
-        task_pk=task_pk,
-        session_id=session_pk,
-        session_number=session_number,
-        digested_sessions=0,
-        status=status,
-    )
+                session_dt = None
+                if req.session_time:
+                    try:
+                        session_dt = datetime.fromisoformat(req.session_time)
+                    except ValueError:
+                        pass
+
+                session = ChatSessionModel(
+                    task_id=task_pk,
+                    chat_id=req.chat_id,
+                    session_number=session_number,
+                    session_time=session_dt,
+                    session_time_raw=req.session_time or None,
+                    digested_at=None,
+                )
+                db.add(session)
+                db.flush()
+                session_pk = session.id
+
+                for pos, msg in enumerate(messages):
+                    msg_dt = None
+                    if msg.get("message_time"):
+                        try:
+                            msg_dt = datetime.fromisoformat(msg["message_time"])
+                        except ValueError:
+                            pass
+                    db.add(
+                        ChatMessageModel(
+                            session_id=session_pk,
+                            position=pos,
+                            speaker=msg["speaker"],
+                            content=msg["content"],
+                            message_time=msg_dt,
+                            message_time_raw=msg.get("message_time") or None,
+                        )
+                    )
+                db.commit()
+
+        digested_sessions = 0
+        digest_succeeded = True
+        if req.digest and req.wait_for_digest:
+            # 同步等待让本次 response 能包含 digest 内全部上游调用 usage。
+            digested_sessions, digest_succeeded = await _run_digest(
+                task_pk, agent_profile
+            )
+        elif req.digest:
+            background_task = asyncio.create_task(_run_digest(task_pk, agent_profile))
+            _background_digest_tasks.add(background_task)
+            background_task.add_done_callback(_background_digest_tasks.discard)
+
+        if req.wait_for_digest and req.digest and not digest_succeeded:
+            status = "stored_and_digest_failed" if req.store else "digest_failed"
+        elif req.store and req.digest and req.wait_for_digest:
+            status = "stored_and_digested"
+        elif req.digest and req.wait_for_digest:
+            status = "digested"
+        elif req.store and req.digest:
+            status = "stored_and_digest_queued"
+        elif req.digest:
+            status = "digest_queued"
+        else:
+            status = "stored"
+
+        return MemoryResponse(
+            dataset_id=dataset_id,
+            task_pk=task_pk,
+            session_id=session_pk,
+            session_number=session_number,
+            digested_sessions=digested_sessions,
+            status=status,
+            trace=trace.snapshot(),
+        )
+    finally:
+        finish_trace(trace_token)
 
 
 # ── POST /api/memory/search ───────────────────────────────────────────────
@@ -281,38 +312,50 @@ async def process_memory(req: MemoryRequest):
 
 @router.post("/memory/search", response_model=MemorySearchResponse)
 async def search_memory(req: MemorySearchRequest):
-    """Search memory for a question, returning packed context."""
-    resolved = get_task_pk(req.dataset, req.task)
-    if resolved is None:
-        raise HTTPException(
-            404, f"Task '{req.task}' not found in dataset '{req.dataset}'"
+    """检索记忆并返回结果及本次请求的完整上游 trace。
+
+    Args:
+        req: 数据隔离键、问题和召回策略。
+
+    Returns:
+        MemorySearchResponse: 召回结果、聊天来源和临时 trace。
+    """
+    trace, trace_token = start_trace()
+    try:
+        resolved = get_task_pk(req.dataset, req.task)
+        if resolved is None:
+            raise HTTPException(
+                404, f"Task '{req.task}' not found in dataset '{req.dataset}'"
+            )
+        task_pk = resolved
+
+        sf = search_mgr.get_session_factory()
+        embed_client = search_mgr.get_embed_client()
+        http_client = search_mgr.get_http_client()
+        top_k = req.top_k or settings.QA_RERANK_TOP_K
+
+        schema = f"task_{int(task_pk)}__{_RUN_TAG}"
+        with sf() as db:
+            db.execute(sa_text(f"SET LOCAL search_path TO {schema}, public"))
+            result = _retrieval.search(
+                question=req.question,
+                task_id=task_pk,
+                db=db,
+                embed_client=embed_client,
+                http_client=http_client,
+                top_k=top_k,
+                strategy=req.strategy,
+                mode=req.mode,
+            )
+
+        return MemorySearchResponse(
+            packed_context=result["packed_context"],
+            packed_token_count=result["packed_token_count"],
+            fact_ids=result["fact_ids"],
+            facts=[RetrievedFactOut(**f) for f in result["facts"]],
+            sessions=[RetrievedSessionOut(**s) for s in result["sessions"]],
+            raw_messages=[],
+            trace=trace.snapshot(),
         )
-    task_pk = resolved
-
-    sf = search_mgr.get_session_factory()
-    embed_client = search_mgr.get_embed_client()
-    http_client = search_mgr.get_http_client()
-    top_k = req.top_k or settings.QA_RERANK_TOP_K
-
-    schema = f"task_{int(task_pk)}__{_RUN_TAG}"
-    with sf() as db:
-        db.execute(sa_text(f"SET LOCAL search_path TO {schema}, public"))
-        result = _retrieval.search(
-            question=req.question,
-            task_id=task_pk,
-            db=db,
-            embed_client=embed_client,
-            http_client=http_client,
-            top_k=top_k,
-            strategy=req.strategy,
-            mode=req.mode,
-        )
-
-    return MemorySearchResponse(
-        packed_context=result["packed_context"],
-        packed_token_count=result["packed_token_count"],
-        fact_ids=result["fact_ids"],
-        facts=[RetrievedFactOut(**f) for f in result["facts"]],
-        sessions=[RetrievedSessionOut(**s) for s in result["sessions"]],
-        raw_messages=[],
-    )
+    finally:
+        finish_trace(trace_token)

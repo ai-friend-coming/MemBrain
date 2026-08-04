@@ -5,6 +5,7 @@ import time
 
 import httpx
 
+from membrain.api.trace import record_call, response_usage
 from membrain.config import settings
 
 log = logging.getLogger(__name__)
@@ -37,8 +38,18 @@ class EmbeddingClient:
         """
         last_exc: Exception | None = None
         for attempt in range(_MAX_RETRIES):
+            started_at = time.perf_counter()
             try:
                 resp = self._client.request(method, url, **kwargs)
+                record_call(
+                    kind="embedding",
+                    model=self.model,
+                    url=url,
+                    started_at=started_at,
+                    status=resp.status_code,
+                    usage=response_usage(resp),
+                    error=f"HTTP {resp.status_code}" if resp.status_code >= 400 else None,
+                )
                 resp.raise_for_status()
                 return resp
             except httpx.HTTPStatusError as exc:
@@ -65,6 +76,13 @@ class EmbeddingClient:
                     )
                     time.sleep(delay)
             except (httpx.TransportError, httpx.TimeoutException) as exc:
+                record_call(
+                    kind="embedding",
+                    model=self.model,
+                    url=url,
+                    started_at=started_at,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 last_exc = exc
                 if attempt < _MAX_RETRIES - 1:
                     delay = _BACKOFF_BASE * (2**attempt)

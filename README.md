@@ -41,7 +41,8 @@ POST /api/memory
     }
   ],
   "store": true,
-  "digest": true
+  "digest": true,
+  "wait_for_digest": true
 }
 ```
 
@@ -52,6 +53,7 @@ POST /api/memory
 - `messages`：待写入消息。
 - `store`：保存原始消息。
 - `digest`：触发后台记忆构建。
+- `wait_for_digest`：是否等待本次 digest 完成；`true` 时 response trace 包含 digest 的全部上游调用，默认 `false` 只入队。
 - `agent_profile`：可选，任务级 Agent 画像。
 
 典型响应：
@@ -62,8 +64,14 @@ POST /api/memory
   "task_pk": 1,
   "session_id": 1,
   "session_number": 1,
-  "digested_sessions": 0,
-  "status": "stored_and_digest_queued"
+  "digested_sessions": 1,
+  "status": "stored_and_digested",
+  "trace": {
+    "duration_ms": 1234.5,
+    "calls": [],
+    "total_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    "estimated_cost_usd": null
+  }
 }
 ```
 
@@ -73,16 +81,20 @@ POST /api/memory
 - `task_pk`：内部任务主键 ID。
 - `session_id`：本次新写入的会话 ID；当 `store=false` 时为 `null`。
 - `session_number`：当前 task 下递增的会话序号；当 `store=false` 时为 `null`。
-- `digested_sessions`：当前固定返回 `0`，因为 digest 是后台异步执行。
+- `digested_sessions`：`wait_for_digest=true` 时本次同步完成的会话数；异步入队时为 `0`。
 - `status`：处理状态。
+- `trace`：本次 API 请求内所有上游 API 调用的耗时、HTTP 状态、真实 token usage、错误和估算成本；只在 response 中返回，不持久化。
 
 `status` 可能值：
 
 - `"stored"`：只保存原始消息，未触发 digest。
 - `"stored_and_digest_queued"`：已保存原始消息，并已把 digest 放入后台队列。
 - `"digest_queued"`：未写入新消息，只把已有未处理会话放入 digest 队列。
+- `"stored_and_digested"`：已保存消息并同步完成 digest（`wait_for_digest=true`）。
+- `"digested"`：未写入新消息并同步完成 digest（`wait_for_digest=true`）。
+- `"stored_and_digest_failed"` / `"digest_failed"`：同步 digest 发生上游或处理异常；`trace.calls` 保留失败调用，已完成的部分可能已经落库。
 
-注意：`digest=true` 时接口会在后台任务入队后立即返回；新写入记忆需要等 digest 完成后才能被 `/api/memory/search` 检索到。
+注意：默认 `digest=true` 仍会立即入队返回；需要在同一 response 中拿到 digest usage 时传入 `wait_for_digest=true`。同步模式完成后新记忆即可被 `/api/memory/search` 检索到。
 
 ### 检索记忆
 
@@ -155,9 +167,17 @@ POST /api/memory/search
       "contributing_facts": 1
     }
   ],
-  "raw_messages": []
+  "raw_messages": [],
+  "trace": {
+    "duration_ms": 98.1,
+    "calls": [],
+    "total_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    "estimated_cost_usd": null
+  }
 }
 ```
+
+`trace.calls[*]` 的 `kind` 包括 `llm`、`embedding`、`rerank`；上游没有返回 token usage 时对应值为 0。成本按公开的美元/百万 token 单价估算：`gpt-4.1-mini` 为输入 0.40 / 输出 1.60，`gpt-4.1` 为输入 2.00 / 输出 8.00，`text-embedding-3-large` 为输入 0.13。未知模型（例如当前 rerank 模型）的单次成本为 `null`，且不计入 trace 成本小计；代理平台实际账单可能不同。
 
 `facts[*]` 字段：
 

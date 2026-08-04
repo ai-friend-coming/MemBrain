@@ -21,12 +21,13 @@ _WAIT_SECONDS = int(os.getenv("MEMBRAIN_E2E_WAIT_SECONDS", "180"))
     "需要 MEMBRAIN_E2E_BASE_URL 和 MEMBRAIN_E2E_DATABASE_URL 才能运行真实 API 测试",
 )
 class MemoryApiE2ETest(unittest.TestCase):
-    """验证 add、异步 digest 与 recall 的真实端到端契约。"""
+    """验证同步 digest、请求 trace、来源标记与 recall 的真实端到端契约。"""
 
     @classmethod
     def setUpClass(cls) -> None:
         """创建独立的 HTTP 客户端和本轮测试数据集。"""
-        cls.client = httpx.Client(base_url=_BASE_URL, timeout=60.0)
+        # 同步 digest 需要覆盖完整上游链路，沿用 E2E 的统一等待上限。
+        cls.client = httpx.Client(base_url=_BASE_URL, timeout=float(_WAIT_SECONDS))
         health = cls.client.get("/health")
         health.raise_for_status()
         cls.db = psycopg2.connect(_DATABASE_URL)
@@ -77,34 +78,24 @@ class MemoryApiE2ETest(unittest.TestCase):
                 "session_time": message_time,
                 "store": True,
                 "digest": True,
+                "wait_for_digest": True,
                 "agent_profile": agent_profile,
             },
         )
         response.raise_for_status()
         payload = response.json()
-        self.assertEqual(payload["status"], "stored_and_digest_queued")
+        self.assertEqual(payload["status"], "stored_and_digested")
         self.assertIsInstance(payload["session_id"], int)
-        self._wait_for_digest(payload["session_id"])
-        return payload
-
-    def _wait_for_digest(self, session_id: int) -> None:
-        """等待真实后台任务完成指定内部会话的 digest。
-
-        Args:
-            session_id: `/api/memory` 返回的内部会话 ID。
-        """
-        deadline = time.monotonic() + _WAIT_SECONDS
+        self.assertGreaterEqual(payload["digested_sessions"], 1)
+        self.assertTrue(payload["trace"]["calls"])
+        self.assertIn("total_tokens", payload["trace"]["total_usage"])
         with self.db.cursor() as cursor:
-            while time.monotonic() < deadline:
-                cursor.execute(
-                    "SELECT digested_at FROM chat_sessions WHERE id = %s",
-                    (session_id,),
-                )
-                row = cursor.fetchone()
-                if row and row[0] is not None:
-                    return
-                time.sleep(0.5)
-        self.fail(f"等待 session_id={session_id} 的真实 digest 超时")
+            cursor.execute(
+                "SELECT digested_at FROM chat_sessions WHERE id = %s",
+                (payload["session_id"],),
+            )
+            self.assertIsNotNone(cursor.fetchone()[0])
+        return payload
 
     def _search(
         self,
@@ -135,6 +126,9 @@ class MemoryApiE2ETest(unittest.TestCase):
         )
         response.raise_for_status()
         payload = response.json()
+        self.assertIn("trace", payload)
+        self.assertIn("total_usage", payload["trace"])
+        self.assertIsInstance(payload["trace"]["calls"], list)
         for fact in payload["facts"]:
             self.assertIsInstance(fact["source_chat_ids"], list)
             self.assertTrue(fact["source_chat_ids"])

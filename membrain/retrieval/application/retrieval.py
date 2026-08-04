@@ -24,6 +24,7 @@ import httpx
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
+from membrain.api.trace import trace_http_post
 from membrain.config import settings
 from membrain.infra.clients.bm25_query_gen import generate_bm25_query
 from membrain.infra.clients.embedding import EmbeddingClient
@@ -316,8 +317,11 @@ def _reflect_and_refine(
         f"- {f.text}" + (f" ({f.time_info})" if f.time_info else "") for f in facts[:20]
     )
     try:
-        resp = http_client.post(
+        resp = trace_http_post(
+            http_client,
             f"{settings.LLM_API_URL.rstrip('/')}/chat/completions",
+            kind="llm",
+            model=settings.QA_LLM_MODEL,
             json={
                 "model": settings.QA_LLM_MODEL,
                 "messages": [

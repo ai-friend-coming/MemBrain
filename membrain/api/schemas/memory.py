@@ -7,7 +7,7 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,7 +33,30 @@ class MemoryRequest(BaseModel):
     session_time: str = ""
     store: bool = True
     digest: bool = True
+    wait_for_digest: bool = False
     agent_profile: str | None = None
+
+
+class TraceCallOut(BaseModel):
+    """返回单个上游 API 调用的耗时、usage 和错误信息。"""
+
+    kind: str
+    model: str | None = None
+    url: str | None = None
+    duration_ms: float
+    status: int | None = None
+    usage: dict[str, Any] = {}
+    estimated_cost_usd: float | None = None
+    error: str | None = None
+
+
+class TraceOut(BaseModel):
+    """返回当前 API 请求的临时链路追踪汇总。"""
+
+    duration_ms: float
+    calls: list[TraceCallOut] = []
+    total_usage: dict[str, int] = {}
+    estimated_cost_usd: float | None = None
 
 
 class MemoryResponse(BaseModel):
@@ -43,6 +66,7 @@ class MemoryResponse(BaseModel):
     session_number: int | None = None
     digested_sessions: int = 0
     status: str
+    trace: TraceOut
 
 
 # ── POST /api/memory/search ───────────────────────────────────────────────
@@ -102,3 +126,4 @@ class MemorySearchResponse(BaseModel):
     facts: list[RetrievedFactOut]
     sessions: list[RetrievedSessionOut]
     raw_messages: list[RetrievedMessageOut] = []
+    trace: TraceOut

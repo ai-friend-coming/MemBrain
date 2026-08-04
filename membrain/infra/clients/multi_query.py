@@ -7,6 +7,7 @@ import logging
 
 import httpx
 
+from membrain.api.trace import trace_http_post
 from membrain.config import settings
 
 log = logging.getLogger(__name__)
@@ -55,8 +56,11 @@ def generate_multi_queries(
 
     m = model or settings.QA_LLM_MODEL
     try:
-        resp = http_client.post(
+        resp = trace_http_post(
+            http_client,
             f"{settings.LLM_API_URL.rstrip('/')}/chat/completions",
+            kind="llm",
+            model=m,
             json={
                 "model": m,
                 "messages": [

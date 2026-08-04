@@ -1,5 +1,7 @@
 """Factory for creating PydanticAI agents from task manifests."""
 
+import time
+
 from openai.types.chat import ChatCompletion
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -7,6 +9,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 
 from membrain.agents.registry import TaskRegistry
+from membrain.api.trace import record_call, response_usage
 
 
 class _TolerantChatModel(OpenAIChatModel):
@@ -23,6 +26,33 @@ class _TolerantChatModel(OpenAIChatModel):
             usage["total_tokens"] = 0
         data["usage"] = usage
         return ChatCompletion.model_validate(data)
+
+    async def _completions_create(self, messages, stream, model_settings, model_request_parameters):
+        """调用 OpenAI 兼容接口并记录每次 LLM 响应的 usage。"""
+        started_at = time.perf_counter()
+        try:
+            response = await super()._completions_create(
+                messages, stream, model_settings, model_request_parameters
+            )
+        except Exception as exc:
+            record_call(
+                kind="llm",
+                model=str(self.model_name),
+                url=f"{self.base_url.rstrip('/')}/chat/completions",
+                started_at=started_at,
+                status=getattr(exc, "status_code", None),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+        record_call(
+            kind="llm",
+            model=str(self.model_name),
+            url=f"{self.base_url.rstrip('/')}/chat/completions",
+            started_at=started_at,
+            status=200,
+            usage=response_usage(response),
+        )
+        return response
 
 
 class AgentFactory:

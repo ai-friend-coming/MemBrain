@@ -24,6 +24,7 @@ Accepts new conversation messages and/or triggers memory digestion — the proce
 | `session_time` | string | no | `""` | ISO 8601 timestamp representing the session start |
 | `store` | bool | no | `true` | Persist `messages` as a new raw session |
 | `digest` | bool | no | `true` | Trigger memory digestion on all pending undigested sessions |
+| `wait_for_digest` | bool | no | `false` | Wait for digestion before responding so the response trace includes digest calls |
 | `agent_profile` | string | no | `null` | Optional persona profile injected into LLM extraction prompts |
 
 **Message object fields:**
@@ -68,7 +69,7 @@ curl -X POST "http://localhost:8094/api/memory" \
 
 Response `status`: `"stored"`
 
-#### `store=true, digest=true` — Store and digest (default)
+#### `store=true, digest=true` — Store and digest (default, asynchronous)
 
 Persists the session and immediately enqueues background digestion of all unprocessed sessions. This is the standard mode for real-time conversations.
 
@@ -98,6 +99,18 @@ curl -X POST "http://localhost:8094/api/memory" \
 
 Response `status`: `"stored_and_digest_queued"`
 
+Set `"wait_for_digest": true` to wait for completion:
+
+```json
+{
+  "store": true,
+  "digest": true,
+  "wait_for_digest": true
+}
+```
+
+Response `status` becomes `"stored_and_digested"`, and `digested_sessions` reports the number completed in this request.
+
 #### `store=false, digest=true` — Digest only
 
 Triggers digestion on all existing unprocessed sessions without adding new data. Useful for reprocessing or when sessions were pre-loaded via another path.
@@ -124,8 +137,9 @@ Response `status`: `"digest_queued"`
 | `task_pk` | int | Internal primary key of the task |
 | `session_id` | int \| null | Internal ID of the newly stored session (`null` if `store=false`) |
 | `session_number` | int \| null | Sequential session number within the task (`null` if `store=false`) |
-| `digested_sessions` | int | Always `0` — digestion runs in the background |
-| `status` | string | `"stored"` \| `"stored_and_digest_queued"` \| `"digest_queued"` |
+| `digested_sessions` | int | Synchronously completed sessions when `wait_for_digest=true`; otherwise `0` |
+| `status` | string | `"stored"` \| `"stored_and_digest_queued"` \| `"digest_queued"` \| `"stored_and_digested"` \| `"digested"` \| `"stored_and_digest_failed"` \| `"digest_failed"` |
+| `trace` | object | Request-scoped upstream call trace; never stored |
 
 **Example response:**
 
@@ -140,7 +154,7 @@ Response `status`: `"digest_queued"`
 }
 ```
 
-> **Note:** Digestion is asynchronous. The API returns immediately after queueing the background task. Memories will be searchable once the digest worker finishes processing.
+> **Note:** Digestion is asynchronous by default. Use `wait_for_digest=true` when the client needs digest completion and its upstream usage in the same response.
 
 ---
 
@@ -158,6 +172,8 @@ Queries the memory store for a given question, running up to six retrieval paths
 | `mode` | string | no | `"expand"` | Retrieval mode: `"direct"`, `"expand"`, or `"reflect"` |
 | `strategy` | string | no | `"rrf"` | Fusion strategy: `"rrf"` or `"rerank"` |
 | `top_k` | int | no | `12` | Number of top facts to keep after fusion (configurable via `QA_RERANK_TOP_K`) |
+
+The response always includes a request-scoped `trace` with each upstream LLM, embedding, and rerank call, its duration, HTTP status, usage, errors, and estimated cost. The trace is not persisted. Cost totals include only models with a known configured public price; unknown model costs remain `null` and are excluded from the subtotal.
 
 The search endpoint does not accept a `chat_id` filter. It always searches the
 full `dataset + task` memory space and returns provenance in
