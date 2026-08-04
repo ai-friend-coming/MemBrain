@@ -18,7 +18,10 @@ services:
       retries: 10
 
   membrain-api:
-    image: ghcr.io/ai-friend-coming/membrain-api:main
+    image: ${API_IMAGE:-ghcr.io/ai-friend-coming/membrain-api:main}
+    # 默认支持从当前工作区构建 API，发布环境仍可通过 API_IMAGE 指定远端镜像。
+    build:
+      context: .
     container_name: ${API_CONTAINER_NAME:-membrain-api}
     depends_on:
       db:
