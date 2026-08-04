@@ -81,12 +81,12 @@ _MAX_CONTENT_FILTER_ATTEMPTS = 10
 
 
 async def run_agent_with_retry(
-    agent, *, instructions, model_settings, deps=None, max_retries=2
+    agent, *, instructions, model_settings, deps=None, max_retries=3
 ):
-    """Run a pydantic-ai agent with retry on transient LLM errors.
+    """执行 Agent 调用，并对临时上游错误进行有限重试。
 
-    - content_filter: up to _MAX_CONTENT_FILTER_ATTEMPTS tries, no sleep (non-deterministic).
-    - other retryable errors (5xx, timeout, connection): up to max_retries tries, exponential backoff.
+    content_filter 最多尝试 `_MAX_CONTENT_FILTER_ATTEMPTS` 次；连接、超时、限流和
+    5xx 错误最多尝试 `max_retries` 次，并使用指数退避。
     """
     normal_attempts = 0
     cf_attempts = 0
