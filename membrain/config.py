@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     MLX_EMBED_MODEL: str = "mlx-community/Qwen3-Embedding-0.6B-8bit"
     MLX_EMBED_MAX_LENGTH: int = 512
 
+    # File RAG：独立于 memory add/recall 的文件解析、切块和向量召回配置。
+    FILE_RAG_MAX_FILE_BYTES: int = 20 * 1024 * 1024
+    FILE_RAG_MAX_EXTRACTED_TOKENS: int = 200_000
+    FILE_RAG_CHUNK_TOKENS: int = 800
+    FILE_RAG_CHUNK_OVERLAP_TOKENS: int = 100
+    FILE_RAG_EMBED_BATCH_SIZE: int = 10
+    FILE_RAG_TOP_K: int = 5
+    FILE_RAG_MAX_TOP_K: int = 20
+    FILE_RAG_MAX_CONTEXT_TOKENS: int = 4000
+
     # Rerank service
     # http：调用外部 rerank API；mlx：使用 Qwen3 reranker 的 yes/no token 概率打分。
     RERANK_BACKEND: str = "http"

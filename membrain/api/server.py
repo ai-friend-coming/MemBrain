@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from membrain.api.routes.file_knowledge import router as file_knowledge_router
 from membrain.api.routes.memory import router as pipeline_router
 from membrain.api.routes.viewer import router as viewer_router
 from membrain.config import settings
@@ -36,12 +37,13 @@ app = FastAPI(title="MemBrain API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
 app.include_router(viewer_router)
 app.include_router(pipeline_router)
+app.include_router(file_knowledge_router)
 
 
 @app.get("/health")

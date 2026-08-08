@@ -201,6 +201,51 @@ POST /api/memory/search
 - `source`：会话命中来源，常见值包括 `"bm25"`、`"fact_agg"`。
 - `contributing_facts`：贡献到该会话摘要的事实数量。
 
+### File RAG
+
+File RAG 是与长期记忆 add/recall 分离的文件知识库，只使用 `chat_id` 隔离文件，
+不会创建 memory fact、session、entity 或 summary。V0 支持 UTF-8 TXT、Markdown
+和文本型 PDF，索引流程同步完成解析、固定 token 切块、Embedding 和 pgvector
+持久化。
+
+索引文件：
+
+```http
+PUT /api/file-libraries/{chat_id}/documents/{document_id}
+Content-Type: multipart/form-data
+```
+
+表单包含原始 `file` 和 64 位十六进制 `content_sha256`。同一
+`chat_id + document_id + content_sha256` 重复上传会返回 `already_indexed`；同一文档
+ID 上传不同内容会返回 `409`。
+
+检索当前 Chat 文件库：
+
+```http
+POST /api/file-libraries/{chat_id}/search
+Content-Type: application/json
+```
+
+```json
+{
+  "query": "项目的发布条件是什么？",
+  "top_k": 5,
+  "max_tokens": 4000
+}
+```
+
+响应包含按相关性排序的 `chunks`，以及 token 预算内可临时注入主模型的
+`packed_context`。删除接口为：
+
+```http
+DELETE /api/file-libraries/{chat_id}/documents/{document_id}
+DELETE /api/file-libraries/{chat_id}
+```
+
+详细契约和配置见 [File RAG API](docs/file-rag-api.md)。`chat_id` 是隔离键而非访问
+凭证，调用方必须先验证用户对 Chat 和附件的所有权，并把 MemBrain 部署在可信
+服务网络中。
+
 ### Chatbot 接入
 
 推荐映射：

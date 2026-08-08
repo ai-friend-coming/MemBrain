@@ -122,6 +122,8 @@ def _ensure_database_exists() -> None:
 def init_db() -> None:
     """Create all tables that don't already exist (excludes per-task memory tables)."""
     _ensure_database_exists()
+    import membrain.infra.models.file_knowledge  # noqa: F401
+
     public_tables = [
         t
         for t in Base.metadata.sorted_tables
@@ -320,6 +322,7 @@ def init_memory_db() -> None:
         conn.commit()
 
     import membrain.infra.models.dataset  # noqa: F401
+    import membrain.infra.models.file_knowledge  # noqa: F401
     import membrain.infra.models.memory  # noqa: F401
 
     public_tables = [
