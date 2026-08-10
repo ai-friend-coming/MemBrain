@@ -42,7 +42,7 @@ POST /api/memory
   ],
   "store": true,
   "digest": true,
-  "wait_for_digest": true
+  "request_id": "018f3d54-ff5d-7f44-b5ec-2f5bb2f6ef11"
 }
 ```
 
@@ -54,6 +54,7 @@ POST /api/memory
 - `store`：保存原始消息。
 - `digest`：触发后台记忆构建。
 - `wait_for_digest`：是否等待本次 digest 完成；`true` 时 response trace 包含 digest 的全部上游调用，默认 `false` 只入队。
+- `request_id`：异步 `store + digest` 的幂等键；提供后 MemBrain 会持久化任务，并允许通过 `/api/memory/jobs/{request_id}` 查询最终 usage 与结果。
 - `agent_profile`：可选，任务级 Agent 画像。
 
 典型响应：
@@ -64,10 +65,11 @@ POST /api/memory
   "task_pk": 1,
   "session_id": 1,
   "session_number": 1,
-  "digested_sessions": 1,
-  "status": "stored_and_digested",
+  "digested_sessions": 0,
+  "status": "stored_and_digest_queued",
+  "request_id": "018f3d54-ff5d-7f44-b5ec-2f5bb2f6ef11",
   "trace": {
-    "duration_ms": 1234.5,
+    "duration_ms": 8.5,
     "calls": [],
     "total_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     "estimated_cost_usd": null
@@ -83,7 +85,7 @@ POST /api/memory
 - `session_number`：当前 task 下递增的会话序号；当 `store=false` 时为 `null`。
 - `digested_sessions`：`wait_for_digest=true` 时本次同步完成的会话数；异步入队时为 `0`。
 - `status`：处理状态。
-- `trace`：本次 API 请求内所有上游 API 调用的耗时、HTTP 状态、真实 token usage、错误和估算成本；只在 response 中返回，不持久化。
+- `trace`：同步模式返回本次请求的全部调用；持久化异步任务的最终 trace 由任务查询接口返回，并在每次上游调用后持续写入数据库。
 
 `status` 可能值：
 
@@ -94,7 +96,7 @@ POST /api/memory
 - `"digested"`：未写入新消息并同步完成 digest（`wait_for_digest=true`）。
 - `"stored_and_digest_failed"` / `"digest_failed"`：同步 digest 发生上游或处理异常；`trace.calls` 保留失败调用，已完成的部分可能已经落库。
 
-注意：默认 `digest=true` 仍会立即入队返回；需要在同一 response 中拿到 digest usage 时传入 `wait_for_digest=true`。同步模式完成后新记忆即可被 `/api/memory/search` 检索到。
+注意：默认 `digest=true` 仍会立即入队返回。业务调用应提供稳定 `request_id`，随后查询 `GET /api/memory/jobs/{request_id}`；只有 `status=succeeded` 才表示 digest 与最终 usage 已成立。失败任务可调用 `POST /api/memory/jobs/{request_id}/retry` 原地重试，不会重复保存原始消息。同步工具需要在同一 response 中拿到 usage 时仍可传 `wait_for_digest=true`。
 
 ### 检索记忆
 

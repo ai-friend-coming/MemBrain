@@ -37,6 +37,7 @@ class MemoryRequest(BaseModel):
     digest: bool = True
     wait_for_digest: bool = False
     agent_profile: str | None = None
+    request_id: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class MemoryResponse(BaseModel):
@@ -47,6 +48,21 @@ class MemoryResponse(BaseModel):
     digested_sessions: int = 0
     status: str
     trace: TraceOut
+    request_id: str | None = None
+
+
+class MemoryJobResponse(BaseModel):
+    """返回持久化异步 digest 任务的最终事实。"""
+
+    request_id: str
+    dataset_id: int
+    task_pk: int
+    session_id: int
+    session_number: int
+    status: Literal["queued", "running", "succeeded", "failed"]
+    digested_sessions: int
+    trace: TraceOut
+    error: str = ""
 
 
 # ── POST /api/memory/search ───────────────────────────────────────────────

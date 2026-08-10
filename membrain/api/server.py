@@ -11,7 +11,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from membrain.api.routes.file_knowledge import router as file_knowledge_router
-from membrain.api.routes.memory import router as pipeline_router
+from membrain.api.routes.memory import (
+    resume_memory_digest_jobs,
+    shutdown_memory_digest_jobs,
+)
+from membrain.api.routes.memory import (
+    router as pipeline_router,
+)
 from membrain.api.routes.viewer import router as viewer_router
 from membrain.config import settings
 from membrain.infra.db import init_memory_db
@@ -25,7 +31,9 @@ async def lifespan(app: FastAPI):
         init_memory_db()
     except Exception as e:
         _logger.warning("init_memory_db skipped (tables likely exist): %s", e)
+    resume_memory_digest_jobs()
     yield
+    await shutdown_memory_digest_jobs()
     from membrain.api.manager import search_mgr, task_mgr
 
     task_mgr.cleanup_all()

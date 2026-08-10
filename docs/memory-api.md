@@ -5,6 +5,8 @@
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/memory` | POST | Store raw messages, digest pending sessions, or both |
+| `/api/memory/jobs/{request_id}` | GET | Read a durable asynchronous digest result |
+| `/api/memory/jobs/{request_id}/retry` | POST | Retry a failed durable digest job |
 | `/api/memory/search` | POST | Search memory for a question |
 
 ---
@@ -26,6 +28,7 @@ Accepts new conversation messages and/or triggers memory digestion — the proce
 | `digest` | bool | no | `true` | Trigger memory digestion on all pending undigested sessions |
 | `wait_for_digest` | bool | no | `false` | Wait for digestion before responding so the response trace includes digest calls |
 | `agent_profile` | string | no | `null` | Optional persona profile injected into LLM extraction prompts |
+| `request_id` | string | no | `null` | Idempotency key for durable asynchronous `store=true, digest=true` requests |
 
 **Message object fields:**
 
@@ -93,9 +96,12 @@ curl -X POST "http://localhost:8094/api/memory" \
       }
     ],
     "store": true,
-    "digest": true
+    "digest": true,
+    "request_id": "018f3d54-ff5d-7f44-b5ec-2f5bb2f6ef11"
   }'
 ```
+
+When the caller supplies a stable `request_id`, MemBrain atomically stores the raw session and a durable digest job. Repeating the same request returns the existing job instead of creating another session.
 
 Response `status`: `"stored_and_digest_queued"`
 
@@ -138,8 +144,9 @@ Response `status`: `"digest_queued"`
 | `session_id` | int \| null | Internal ID of the newly stored session (`null` if `store=false`) |
 | `session_number` | int \| null | Sequential session number within the task (`null` if `store=false`) |
 | `digested_sessions` | int | Synchronously completed sessions when `wait_for_digest=true`; otherwise `0` |
+| `request_id` | string \| null | Durable job idempotency key supplied by the caller |
 | `status` | string | `"stored"` \| `"stored_and_digest_queued"` \| `"digest_queued"` \| `"stored_and_digested"` \| `"digested"` \| `"stored_and_digest_failed"` \| `"digest_failed"` |
-| `trace` | object | Request-scoped upstream call trace; never stored |
+| `trace` | object | Request-scoped trace; durable job calls are returned by the job endpoint |
 
 **Example response:**
 
@@ -150,11 +157,22 @@ Response `status`: `"digest_queued"`
   "session_id": 3,
   "session_number": 3,
   "digested_sessions": 0,
-  "status": "stored_and_digest_queued"
+  "status": "stored_and_digest_queued",
+  "request_id": "018f3d54-ff5d-7f44-b5ec-2f5bb2f6ef11"
 }
 ```
 
 > **Note:** Digestion is asynchronous by default. Use `wait_for_digest=true` when the client needs digest completion and its upstream usage in the same response.
+
+## GET `/api/memory/jobs/{request_id}`
+
+Returns the durable state `queued`, `running`, `succeeded`, or `failed`. A terminal response contains the accumulated upstream trace, including calls completed before a retry, plus `digested_sessions` and `error`. Unknown request IDs return `404`.
+
+The API process resumes `queued` and interrupted `running` jobs after restart. Concurrent workers use a PostgreSQL advisory lock keyed by task, so one worker updates a task's derived memory tables at a time.
+
+## POST `/api/memory/jobs/{request_id}/retry`
+
+Moves a failed job back to `queued` without creating another raw session. Calls for queued, running, or succeeded jobs are idempotent and return the current job state.
 
 ---
 

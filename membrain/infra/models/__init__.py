@@ -2,6 +2,7 @@ from membrain.infra.models.dataset import (
     ChatMessageModel,
     ChatSessionModel,
     DatasetModel,
+    MemoryDigestJobModel,
     TaskModel,
 )
 from membrain.infra.models.memory import (
@@ -19,6 +20,7 @@ __all__ = [
     "ChatMessageModel",
     "ChatSessionModel",
     "DatasetModel",
+    "MemoryDigestJobModel",
     "TaskModel",
     # Memory pipeline
     "EntityModel",

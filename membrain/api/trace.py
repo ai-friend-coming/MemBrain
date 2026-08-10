@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextvars
 import time
+from collections.abc import Callable
 from typing import Any
 
 # 价格按美元/百万 token 估算；未知模型只返回 usage，不虚构成本。
@@ -75,9 +76,17 @@ def _estimate_cost(model: str | None, usage: dict[str, Any]) -> float | None:
 class RequestTrace:
     """记录一次请求的上游调用、总 usage、耗时和估算成本。"""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        initial_trace: dict[str, Any] | None = None,
+        on_change: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.started_at = time.perf_counter()
-        self.calls: list[dict[str, Any]] = []
+        initial_trace = initial_trace or {}
+        self.elapsed_ms = float(initial_trace.get("duration_ms", 0) or 0)
+        self.calls: list[dict[str, Any]] = list(initial_trace.get("calls", []))
+        self.on_change = on_change
 
     def add_call(
         self,
@@ -104,6 +113,9 @@ class RequestTrace:
                 "error": error,
             }
         )
+        if self.on_change is not None:
+            # 异步任务每完成一次真实上游调用就持久化，进程崩溃后仍能累计已产生的 usage。
+            self.on_change(self.snapshot())
 
     def snapshot(self) -> dict[str, Any]:
         """生成可直接放入 API response 的 trace 快照。"""
@@ -118,7 +130,9 @@ class RequestTrace:
                 cost += call["estimated_cost_usd"]
                 has_cost = True
         return {
-            "duration_ms": round((time.perf_counter() - self.started_at) * 1000, 3),
+            "duration_ms": round(
+                self.elapsed_ms + (time.perf_counter() - self.started_at) * 1000, 3
+            ),
             "calls": self.calls,
             "total_usage": total,
             "estimated_cost_usd": round(cost, 8) if has_cost else None,
@@ -130,9 +144,13 @@ def current_trace() -> RequestTrace | None:
     return _CURRENT_TRACE.get()
 
 
-def start_trace() -> tuple[RequestTrace, contextvars.Token]:
-    """创建并绑定当前请求 trace。"""
-    trace = RequestTrace()
+def start_trace(
+    *,
+    initial_trace: dict[str, Any] | None = None,
+    on_change: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[RequestTrace, contextvars.Token]:
+    """创建并绑定当前请求或持久化任务 trace。"""
+    trace = RequestTrace(initial_trace=initial_trace, on_change=on_change)
     return trace, _CURRENT_TRACE.set(trace)
 
 

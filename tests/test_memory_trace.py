@@ -116,6 +116,45 @@ class RequestTraceTest(unittest.TestCase):
         )
         self.assertEqual(snapshot["estimated_cost_usd"], 0.000625)
 
+    def test_persistent_trace_accumulates_calls_across_retry(self) -> None:
+        """从旧 trace 继续累计，并在每次新调用后输出持久化快照。"""
+        snapshots: list[dict] = []
+        trace = RequestTrace(
+            initial_trace={
+                "duration_ms": 12,
+                "calls": [
+                    {
+                        "kind": "llm",
+                        "model": "gpt-4.1-mini",
+                        "url": "https://example.test/chat/completions",
+                        "duration_ms": 10,
+                        "status": 200,
+                        "usage": {
+                            "prompt_tokens": 2,
+                            "completion_tokens": 1,
+                            "total_tokens": 3,
+                        },
+                        "estimated_cost_usd": 0.0,
+                        "error": None,
+                    }
+                ],
+            },
+            on_change=snapshots.append,
+        )
+        trace.add_call(
+            kind="embedding",
+            model="text-embedding-3-large",
+            url="https://example.test/embeddings",
+            started_at=trace.started_at,
+            status=200,
+            usage={"prompt_tokens": 4, "total_tokens": 4},
+        )
+
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(len(snapshots[0]["calls"]), 2)
+        self.assertEqual(snapshots[0]["total_usage"]["total_tokens"], 7)
+        self.assertGreaterEqual(snapshots[0]["duration_ms"], 12)
+
 
 class DigestFailureTest(unittest.IsolatedAsyncioTestCase):
     """验证同步 digest 不会把处理异常误报为成功。"""
@@ -137,5 +176,5 @@ class DigestFailureTest(unittest.IsolatedAsyncioTestCase):
         ):
             result = await memory_route._run_digest(7, None)
 
-        self.assertEqual(result, (0, False))
+        self.assertEqual(result, (0, "RuntimeError: digest failed"))
         self.assertEqual(manager.cleaned, [7])

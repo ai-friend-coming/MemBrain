@@ -1,6 +1,8 @@
 """ORM models for core dataset tables: datasets, tasks, sessions, messages."""
 
 from sqlalchemy import (
+    JSON,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -8,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -87,3 +90,33 @@ class ChatMessageModel(Base):
     message_time_raw = Column(String(255))
 
     session = relationship("ChatSessionModel", back_populates="messages")
+
+
+class MemoryDigestJobModel(Base):
+    """持久化一次可幂等恢复的异步记忆构建任务。"""
+
+    __tablename__ = "memory_digest_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="memory_digest_jobs_status_chk",
+        ),
+    )
+
+    request_id = Column(String(255), primary_key=True)
+    task_id = Column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id = Column(
+        Integer,
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    status = Column(String(32), nullable=False, default="queued")
+    digested_sessions = Column(Integer, nullable=False, default=0)
+    trace = Column(JSON, nullable=False, default=dict)
+    error = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
