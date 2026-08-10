@@ -28,6 +28,7 @@ from membrain.file_knowledge.service import (
     search_documents,
 )
 from membrain.infra.clients.embedding import EmbeddingClient
+from membrain.infra.clients.rerank import RerankClient
 from membrain.infra.db import SessionLocal
 
 router = APIRouter(prefix="/api/file-libraries", tags=["file-rag"])
@@ -48,7 +49,7 @@ async def put_document(
     Args:
         chat_id: 文件库唯一隔离键。
         document_id: 上游稳定附件 ID。
-        file: TXT、Markdown 或文本型 PDF 原文件。
+        file: File RAG 格式白名单内的原文件。
         content_sha256: 上游计算的文件 SHA-256。
 
     Returns:
@@ -114,12 +115,18 @@ async def search_file_library(
 
         def run_search():
             # 查询不共享长期记忆的 task schema，只访问 public 文件索引表。
-            with SessionLocal() as db, EmbeddingClient() as embed_client:
+            with (
+                SessionLocal() as db,
+                EmbeddingClient() as embed_client,
+                RerankClient() as rerank_client,
+            ):
                 return search_documents(
                     db,
                     embed_client,
+                    rerank_client,
                     chat_id=chat_id,
                     query=req.query,
+                    document_ids=req.document_ids,
                     top_k=req.top_k,
                     max_tokens=req.max_tokens,
                 )

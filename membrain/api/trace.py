@@ -63,7 +63,10 @@ def _estimate_cost(model: str | None, usage: dict[str, Any]) -> float | None:
         return None
     input_price, output_price = _MODEL_PRICES[model]
     return round(
-        (usage["prompt_tokens"] * input_price + usage["completion_tokens"] * output_price)
+        (
+            usage["prompt_tokens"] * input_price
+            + usage["completion_tokens"] * output_price
+        )
         / 1_000_000,
         8,
     )
@@ -145,7 +148,9 @@ def record_call(**kwargs: Any) -> None:
         trace.add_call(**kwargs)
 
 
-def trace_http_post(client: Any, url: str, *, kind: str, model: str | None, **kwargs: Any) -> Any:
+def trace_http_post(
+    client: Any, url: str, *, kind: str, model: str | None, **kwargs: Any
+) -> Any:
     """调用 HTTP 上游并记录响应状态、usage 和耗时。"""
     started_at = time.perf_counter()
     try:

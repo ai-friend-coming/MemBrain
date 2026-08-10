@@ -27,7 +27,9 @@ class _TolerantChatModel(OpenAIChatModel):
         data["usage"] = usage
         return ChatCompletion.model_validate(data)
 
-    async def _completions_create(self, messages, stream, model_settings, model_request_parameters):
+    async def _completions_create(
+        self, messages, stream, model_settings, model_request_parameters
+    ):
         """调用 OpenAI 兼容接口并记录每次 LLM 响应的 usage。"""
         started_at = time.perf_counter()
         try:

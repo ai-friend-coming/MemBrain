@@ -48,7 +48,9 @@ class EmbeddingClient:
                     started_at=started_at,
                     status=resp.status_code,
                     usage=response_usage(resp),
-                    error=f"HTTP {resp.status_code}" if resp.status_code >= 400 else None,
+                    error=f"HTTP {resp.status_code}"
+                    if resp.status_code >= 400
+                    else None,
                 )
                 resp.raise_for_status()
                 return resp

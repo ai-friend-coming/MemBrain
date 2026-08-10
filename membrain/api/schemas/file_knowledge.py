@@ -19,6 +19,7 @@ class FileIndexResponse(BaseModel):
     mime_type: str
     chunk_count: int
     extracted_tokens: int
+    index_version: int
     trace: TraceOut
 
 
@@ -26,6 +27,7 @@ class FileSearchRequest(BaseModel):
     """接收一个 Chat 文件库的向量检索参数。"""
 
     query: str = Field(min_length=1)
+    document_ids: list[str] | None = Field(default=None, min_length=1)
     top_k: int = Field(
         default=settings.FILE_RAG_TOP_K,
         ge=1,
@@ -48,6 +50,12 @@ class RetrievedFileChunkOut(BaseModel):
     page_number: int | None = None
     token_count: int
     score: float
+    retrieval_sources: list[str]
+    embedding_score: float | None = None
+    bm25_score: float | None = None
+    rrf_score: float
+    rerank_score: float | None = None
+    context_prefix: str
     content: str
 
 

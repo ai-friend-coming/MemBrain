@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import html
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import PurePath
 
 from sqlalchemy import func
 from sqlalchemy import text as sa_text
@@ -15,7 +17,12 @@ from sqlalchemy.orm import Session
 from membrain.config import settings
 from membrain.file_knowledge.parsing import count_tokens, parse_file, split_sections
 from membrain.infra.clients.embedding import EmbeddingClient
+from membrain.infra.clients.rerank import RerankClient
 from membrain.infra.models.file_knowledge import FileChunkModel, FileDocumentModel
+
+log = logging.getLogger(__name__)
+
+FILE_RAG_INDEX_VERSION = 2
 
 
 class FileRAGInputError(ValueError):
@@ -42,6 +49,7 @@ class IndexedDocument:
     mime_type: str
     chunk_count: int
     extracted_tokens: int
+    index_version: int
 
 
 @dataclass(frozen=True)
@@ -55,7 +63,33 @@ class RetrievedFileChunk:
     page_number: int | None
     token_count: int
     score: float
+    retrieval_sources: list[str]
+    embedding_score: float | None
+    bm25_score: float | None
+    rrf_score: float
+    rerank_score: float | None
+    context_prefix: str
     content: str
+
+
+@dataclass
+class _FileChunkCandidate:
+    """维护混合召回到 rerank 之间的可变候选状态。"""
+
+    chunk_id: int
+    document_id: str
+    file_name: str
+    chunk_index: int
+    page_number: int | None
+    token_count: int
+    context_prefix: str
+    retrieval_text: str
+    content: str
+    embedding_score: float | None = None
+    bm25_score: float | None = None
+    rrf_score: float = 0.0
+    rerank_score: float | None = None
+    retrieval_sources: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -87,7 +121,53 @@ def _indexed_document(model: FileDocumentModel, status: str) -> IndexedDocument:
         mime_type=model.mime_type,
         chunk_count=model.chunk_count,
         extracted_tokens=model.extracted_tokens,
+        index_version=model.index_version,
     )
+
+
+def _contextualize_chunk(
+    file_name: str,
+    mime_type: str,
+    chunk_content: str,
+    chunk_index: int,
+    chunk_count: int,
+    page_number: int | None,
+) -> tuple[str, str]:
+    """生成确定性的 chunk 定位上下文和统一检索文本。
+
+    Args:
+        file_name: 用户可见的原始文件名。
+        mime_type: 文件 MIME 类型。
+        chunk_content: 不可变原始 chunk 正文。
+        chunk_index: 当前 chunk 的零基序号。
+        chunk_count: 文档 chunk 总数。
+        page_number: PDF 原始页码。
+
+    Returns:
+        tuple[str, str]: 可独立展示的上下文前缀，以及供 Embedding/BM25/rerank 共用的文本。
+    """
+
+    suffix = PurePath(file_name).suffix.removeprefix(".").upper()
+    file_type = suffix or mime_type.split(";", 1)[0].strip() or "未知"
+    parts = [
+        f"文件名：{file_name}",
+        f"文件格式：{file_type}",
+        f"片段位置：第 {chunk_index + 1}/{chunk_count} 个",
+    ]
+    if page_number is not None:
+        parts.append(f"页码：第 {page_number} 页")
+    heading = next(
+        (
+            match.group(1).strip()
+            for line in chunk_content.splitlines()
+            if (match := re.match(r"^#{1,6}\s+(.+)$", line.strip()))
+        ),
+        "",
+    )
+    if heading:
+        parts.append(f"章节：{heading}")
+    context_prefix = "\n".join(parts)
+    return context_prefix, context_prefix + "\n\n原文：\n" + chunk_content
 
 
 def _validate_embedding_vectors(
@@ -166,7 +246,8 @@ def index_document(
     if existing is not None:
         if existing.content_sha256 != actual_sha256:
             raise DocumentConflictError("同一 document_id 已经绑定另一份文件内容")
-        return _indexed_document(existing, "already_indexed")
+        if existing.index_version == FILE_RAG_INDEX_VERSION:
+            return _indexed_document(existing, "already_indexed")
 
     sections = parse_file(file_name, mime_type, content)
     extracted_tokens = sum(count_tokens(section.text) for section in sections)
@@ -183,6 +264,18 @@ def index_document(
     if not chunks:
         raise FileRAGInputError("文件没有产生可索引 chunk")
 
+    contextualized_chunks = [
+        _contextualize_chunk(
+            file_name,
+            mime_type,
+            chunk.content,
+            chunk.index,
+            len(chunks),
+            chunk.page_number,
+        )
+        for chunk in chunks
+    ]
+
     vectors: list[list[float]] = []
     batch_size = settings.FILE_RAG_EMBED_BATCH_SIZE
     if batch_size <= 0:
@@ -190,10 +283,20 @@ def index_document(
     for start in range(0, len(chunks), batch_size):
         vectors.extend(
             embed_client.embed(
-                [chunk.content for chunk in chunks[start : start + batch_size]]
+                [
+                    retrieval_text
+                    for _, retrieval_text in contextualized_chunks[
+                        start : start + batch_size
+                    ]
+                ]
             )
         )
     _validate_embedding_vectors(vectors, len(chunks))
+
+    # Embedding 成功后才替换旧版索引，避免外部服务故障使已有文件暂时不可检索。
+    if existing is not None:
+        db.delete(existing)
+        db.flush()
 
     document = FileDocumentModel(
         chat_id=chat_id,
@@ -203,17 +306,23 @@ def index_document(
         mime_type=mime_type,
         chunk_count=len(chunks),
         extracted_tokens=extracted_tokens,
+        index_version=FILE_RAG_INDEX_VERSION,
     )
     try:
         db.add(document)
         # 唯一键冲突通常在 flush 时出现，因此文档和 chunk 写入必须共用补偿分支。
         db.flush()
-        for chunk, vector in zip(chunks, vectors, strict=True):
+        for chunk, contextualized, vector in zip(
+            chunks, contextualized_chunks, vectors, strict=True
+        ):
+            context_prefix, retrieval_text = contextualized
             db.add(
                 FileChunkModel(
                     document_pk=document.id,
                     chunk_index=chunk.index,
                     content=chunk.content,
+                    context_prefix=context_prefix,
+                    retrieval_text=retrieval_text,
                     token_count=chunk.token_count,
                     page_number=chunk.page_number,
                     embedding=vector,
@@ -228,7 +337,11 @@ def index_document(
             .filter_by(chat_id=chat_id, document_id=document_id)
             .first()
         )
-        if concurrent is None or concurrent.content_sha256 != actual_sha256:
+        if (
+            concurrent is None
+            or concurrent.content_sha256 != actual_sha256
+            or concurrent.index_version != FILE_RAG_INDEX_VERSION
+        ):
             raise DocumentConflictError("同一 document_id 并发写入了不同文件内容")
         return _indexed_document(concurrent, "already_indexed")
     db.refresh(document)
@@ -265,7 +378,10 @@ def _pack_file_context(
         if chunk.page_number is not None:
             attributes.append(f'page_number="{chunk.page_number}"')
         entry = (
-            f"<chunk {' '.join(attributes)}>\n{html.escape(chunk.content)}\n</chunk>"
+            f"<chunk {' '.join(attributes)}>\n"
+            f"<context>{html.escape(chunk.context_prefix)}</context>\n"
+            f"<content>{html.escape(chunk.content)}</content>\n"
+            "</chunk>"
         )
         entry_tokens = count_tokens(entry)
         if used_tokens + entry_tokens > max_tokens:
@@ -282,19 +398,23 @@ def _pack_file_context(
 def search_documents(
     db: Session,
     embed_client: EmbeddingClient,
+    rerank_client: RerankClient,
     *,
     chat_id: str,
     query: str,
+    document_ids: list[str] | None,
     top_k: int,
     max_tokens: int,
 ) -> FileSearchResult:
-    """在单个 Chat 文件库内执行 query Embedding 和 pgvector 精确检索。
+    """在单个 Chat 的可选文件范围内执行混合召回与 rerank。
 
     Args:
         db: public schema 数据库会话。
         embed_client: MemBrain 当前统一 Embedding 客户端。
+        rerank_client: 对融合候选执行相关性精排的客户端。
         chat_id: 唯一文件库隔离键。
         query: 上游根据当前对话构造的检索问题。
+        document_ids: 可选的当前 Chat 文档硬过滤范围。
         top_k: 最多返回的结构化 chunk 数量。
         max_tokens: `packed_context` 的最大 token 数。
 
@@ -308,57 +428,179 @@ def search_documents(
 
     chat_id = chat_id.strip()
     query = query.strip()
+    normalized_document_ids = (
+        list(dict.fromkeys(item.strip() for item in document_ids if item.strip()))
+        if document_ids is not None
+        else None
+    )
     if not chat_id or not query:
         raise FileRAGInputError("chat_id 和 query 不能为空")
+    if document_ids is not None and not normalized_document_ids:
+        raise FileRAGInputError("document_ids 不能为空数组")
     if not 1 <= top_k <= settings.FILE_RAG_MAX_TOP_K:
         raise FileRAGInputError("top_k 超出 File RAG 配置范围")
     if not 1 <= max_tokens <= settings.FILE_RAG_MAX_CONTEXT_TOKENS:
         raise FileRAGInputError("max_tokens 超出 File RAG 配置范围")
 
-    document_exists = (
-        db.query(FileDocumentModel.id)
-        .filter(FileDocumentModel.chat_id == chat_id)
-        .first()
+    document_query = db.query(FileDocumentModel.id).filter(
+        FileDocumentModel.chat_id == chat_id
     )
+    if normalized_document_ids is not None:
+        document_query = document_query.filter(
+            FileDocumentModel.document_id.in_(normalized_document_ids)
+        )
+    document_exists = document_query.first()
     if document_exists is None:
         return FileSearchResult(chunks=[], packed_context="", packed_token_count=0)
 
+    scope_sql = ""
+    params: dict[str, object] = {"chat_id": chat_id}
+    if normalized_document_ids is not None:
+        scope_sql = " AND fd.document_id = ANY(:document_ids)"
+        params["document_ids"] = normalized_document_ids
+
+    # 向量路径处理语义近似，BM25 路径保留文件名、编号和术语等精确匹配。
     query_vector = embed_client.embed_single(query)
     _validate_embedding_vectors([query_vector], 1)
-    rows = db.execute(
-        sa_text("""
+    vector_rows = db.execute(
+        sa_text(
+            """
             SELECT fc.id AS chunk_id,
                    fd.document_id,
                    fd.file_name,
                    fc.chunk_index,
                    fc.page_number,
                    fc.token_count,
-                   1 - (fc.embedding <=> CAST(:vector AS halfvec)) AS score,
-                   fc.content
+                   fc.context_prefix,
+                   fc.retrieval_text,
+                   fc.content,
+                   1 - (fc.embedding <=> CAST(:vector AS halfvec)) AS path_score
             FROM public.file_chunks fc
             JOIN public.file_documents fd ON fd.id = fc.document_pk
             WHERE fd.chat_id = :chat_id
+            """
+            + scope_sql
+            + """
             ORDER BY fc.embedding <=> CAST(:vector AS halfvec)
-            LIMIT :top_k
-        """),
+            LIMIT :candidate_limit
+            """
+        ),
         {
+            **params,
             "vector": _vector_literal(query_vector),
-            "chat_id": chat_id,
-            "top_k": top_k,
+            "candidate_limit": settings.FILE_RAG_VECTOR_CANDIDATE_TOP_N,
         },
     ).fetchall()
+    bm25_rows = db.execute(
+        sa_text(
+            """
+            SELECT fc.id AS chunk_id,
+                   fd.document_id,
+                   fd.file_name,
+                   fc.chunk_index,
+                   fc.page_number,
+                   fc.token_count,
+                   fc.context_prefix,
+                   fc.retrieval_text,
+                   fc.content
+                   , pdb.score(fc.id) AS path_score
+            FROM public.file_chunks fc
+            JOIN public.file_documents fd ON fd.id = fc.document_pk
+            WHERE fd.chat_id = :chat_id
+              AND fc.retrieval_text ||| :query
+            """
+            + scope_sql
+            + """
+            ORDER BY path_score DESC
+            LIMIT :candidate_limit
+            """
+        ),
+        {
+            **params,
+            "query": query,
+            "candidate_limit": settings.FILE_RAG_BM25_CANDIDATE_TOP_N,
+        },
+    ).fetchall()
+
+    candidates: dict[int, _FileChunkCandidate] = {}
+
+    def merge_path(rows, source: str) -> list[int]:
+        """合并一路有序候选，并保留该路径原始分数。"""
+
+        ranked_ids: list[int] = []
+        for row in rows:
+            candidate = candidates.get(row.chunk_id)
+            if candidate is None:
+                candidate = _FileChunkCandidate(
+                    chunk_id=row.chunk_id,
+                    document_id=row.document_id,
+                    file_name=row.file_name,
+                    chunk_index=row.chunk_index,
+                    page_number=row.page_number,
+                    token_count=row.token_count,
+                    context_prefix=row.context_prefix,
+                    retrieval_text=row.retrieval_text,
+                    content=row.content,
+                )
+                candidates[row.chunk_id] = candidate
+            candidate.retrieval_sources.add(source)
+            if source == "embedding":
+                candidate.embedding_score = float(row.path_score)
+            else:
+                candidate.bm25_score = float(row.path_score)
+            ranked_ids.append(row.chunk_id)
+        return ranked_ids
+
+    ranked_lists = [
+        merge_path(vector_rows, "embedding"),
+        merge_path(bm25_rows, "bm25"),
+    ]
+    for ranked_ids in ranked_lists:
+        for rank, chunk_id in enumerate(ranked_ids, start=1):
+            candidates[chunk_id].rrf_score += 1.0 / (settings.FILE_RAG_RRF_K + rank)
+    pool = sorted(candidates.values(), key=lambda item: item.rrf_score, reverse=True)[
+        : settings.FILE_RAG_FUSION_CANDIDATE_TOP_N
+    ]
+
+    # Rerank 故障沿用 MemBrain 长期记忆链路的降级语义，按 RRF 顺序继续返回。
+    final_candidates = pool[:top_k]
+    if pool:
+        try:
+            reranked = rerank_client.rerank(
+                query,
+                [candidate.retrieval_text for candidate in pool],
+                top_n=min(top_k, len(pool)),
+            )
+            final_candidates = []
+            for item in reranked:
+                candidate = pool[item["index"]]
+                candidate.rerank_score = float(item["relevance_score"])
+                final_candidates.append(candidate)
+        except Exception:
+            log.warning("File RAG rerank failed, falling back to RRF", exc_info=True)
+
     chunks = [
         RetrievedFileChunk(
-            chunk_id=row.chunk_id,
-            document_id=row.document_id,
-            file_name=row.file_name,
-            chunk_index=row.chunk_index,
-            page_number=row.page_number,
-            token_count=row.token_count,
-            score=float(row.score),
-            content=row.content,
+            chunk_id=candidate.chunk_id,
+            document_id=candidate.document_id,
+            file_name=candidate.file_name,
+            chunk_index=candidate.chunk_index,
+            page_number=candidate.page_number,
+            token_count=candidate.token_count,
+            score=(
+                candidate.rerank_score
+                if candidate.rerank_score is not None
+                else candidate.rrf_score
+            ),
+            retrieval_sources=sorted(candidate.retrieval_sources),
+            embedding_score=candidate.embedding_score,
+            bm25_score=candidate.bm25_score,
+            rrf_score=candidate.rrf_score,
+            rerank_score=candidate.rerank_score,
+            context_prefix=candidate.context_prefix,
+            content=candidate.content,
         )
-        for row in rows
+        for candidate in final_candidates
     ]
     packed_context, packed_token_count = _pack_file_context(chunks, max_tokens)
     return FileSearchResult(

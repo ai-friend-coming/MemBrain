@@ -35,6 +35,7 @@ class FileDocumentModel(Base):
     mime_type = Column(String(255), nullable=False)
     chunk_count = Column(Integer, nullable=False)
     extracted_tokens = Column(Integer, nullable=False)
+    index_version = Column(Integer, nullable=False)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     chunks = relationship(
@@ -62,6 +63,8 @@ class FileChunkModel(Base):
     )
     chunk_index = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
+    context_prefix = Column(Text, nullable=False)
+    retrieval_text = Column(Text, nullable=False)
     token_count = Column(Integer, nullable=False)
     page_number = Column(Integer, nullable=True)
     embedding = Column(HALFVEC(settings.EMBED_DIM), nullable=False)

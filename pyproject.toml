@@ -20,6 +20,7 @@ dependencies = [
     "prometheus-client>=0.20",
     "pgvector>=0.3",
     "pypdf>=5.0",
+    "markitdown[docx,pptx,xlsx,xls]==0.1.7",
     "httpx>=0.28",
     "uuid-utils>=0.9",
     "tiktoken>=0.9",

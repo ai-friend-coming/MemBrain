@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     FILE_RAG_TOP_K: int = 5
     FILE_RAG_MAX_TOP_K: int = 20
     FILE_RAG_MAX_CONTEXT_TOKENS: int = 4000
+    FILE_RAG_VECTOR_CANDIDATE_TOP_N: int = 20
+    FILE_RAG_BM25_CANDIDATE_TOP_N: int = 20
+    FILE_RAG_FUSION_CANDIDATE_TOP_N: int = 20
+    FILE_RAG_RRF_K: int = 60
 
     # Rerank service
     # http：调用外部 rerank API；mlx：使用 Qwen3 reranker 的 yes/no token 概率打分。

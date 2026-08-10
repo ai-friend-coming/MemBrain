@@ -333,17 +333,64 @@ def init_memory_db() -> None:
     Base.metadata.create_all(bind=engine, tables=public_tables)
 
     with engine.connect() as conn:
+        # 多 worker 会并发执行启动迁移，必须在获取任何表锁前串行化整段 File RAG 迁移。
+        conn.execute(text(f"SELECT pg_advisory_xact_lock({_BM25_ADVISORY_LOCK_KEY})"))
+        # File RAG 派生字段独立迁移，避免后续旧 memory 数据升级失败时阻断文件索引升级。
+        conn.execute(
+            text(
+                "ALTER TABLE file_documents "
+                "ADD COLUMN IF NOT EXISTS index_version INTEGER NOT NULL DEFAULT 1"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE file_chunks "
+                "ADD COLUMN IF NOT EXISTS context_prefix TEXT NOT NULL DEFAULT ''"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE file_chunks "
+                "ADD COLUMN IF NOT EXISTS retrieval_text TEXT NOT NULL DEFAULT ''"
+            )
+        )
+        # 旧 chunk 在重新索引前仍可参与混合检索，索引版本由上游触发完整重建。
+        conn.execute(
+            text(
+                "UPDATE file_chunks SET retrieval_text = content "
+                "WHERE retrieval_text = ''"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_file_chunks_retrieval_bm25 "
+                "ON file_chunks USING bm25 "
+                "(id, (retrieval_text::pdb.chinese_compatible)) "
+                "WITH (key_field='id')"
+            )
+        )
+        conn.commit()
+
+    with engine.connect() as conn:
+        conn.execute(text(f"SELECT pg_advisory_xact_lock({_BM25_ADVISORY_LOCK_KEY})"))
         conn.execute(
             text(
                 "ALTER TABLE tasks "
                 "ADD COLUMN IF NOT EXISTS agent_profile VARCHAR(64) NULL"
             )
         )
-        # 不保留无来源会话：已有数据未提供 chat_id 时应由部署方清理后再升级。
+        # 旧版本没有外部 chat_id；稳定的 legacy 标识保留历史记忆，同时避免伪装成当前 Chat。
         conn.execute(
             text(
                 "ALTER TABLE chat_sessions "
                 "ADD COLUMN IF NOT EXISTS chat_id VARCHAR(255) NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE chat_sessions "
+                "SET chat_id = concat('legacy:', task_id, ':', session_number) "
+                "WHERE chat_id IS NULL OR btrim(chat_id) = ''"
             )
         )
         conn.execute(
@@ -352,6 +399,7 @@ def init_memory_db() -> None:
         conn.commit()
 
     with engine.connect() as conn:
+        conn.execute(text(f"SELECT pg_advisory_xact_lock({_BM25_ADVISORY_LOCK_KEY})"))
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_chat_messages_bm25 "

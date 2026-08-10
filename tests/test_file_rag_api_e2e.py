@@ -27,6 +27,10 @@ class FileRagApiE2ETest(unittest.TestCase):
         cls.chat_id = f"file-rag-e2e-{uuid.uuid4().hex}"
         cls.document_id = "release-notes"
         cls.content = b"Project Aurora release gate is exactly Friday at 18:00 UTC."
+        cls.other_document_id = "other-release-notes"
+        cls.other_content = (
+            b"Project Borealis release gate is exactly Monday at 09:00 UTC."
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -51,14 +55,40 @@ class FileRagApiE2ETest(unittest.TestCase):
         repeated = self.client.put(path, **upload)
         repeated.raise_for_status()
         self.assertEqual(repeated.json()["status"], "already_indexed")
+        self.assertEqual(
+            repeated.json()["index_version"], indexed.json()["index_version"]
+        )
+
+        other_path = (
+            f"/api/file-libraries/{self.chat_id}/documents/{self.other_document_id}"
+        )
+        other = self.client.put(
+            other_path,
+            files={"file": ("other-release.txt", self.other_content, "text/plain")},
+            data={"content_sha256": hashlib.sha256(self.other_content).hexdigest()},
+        )
+        other.raise_for_status()
 
         found = self.client.post(
             f"/api/file-libraries/{self.chat_id}/search",
-            json={"query": "When is the Aurora release gate?"},
+            json={
+                "query": "When is the release gate?",
+                "document_ids": [self.document_id],
+            },
         )
         found.raise_for_status()
+        self.assertTrue(found.json()["chunks"])
+        self.assertTrue(
+            all(
+                chunk["document_id"] == self.document_id
+                for chunk in found.json()["chunks"]
+            )
+        )
         self.assertEqual(found.json()["chunks"][0]["document_id"], self.document_id)
         self.assertIn("Friday", found.json()["packed_context"])
+        self.assertIn("release.txt", found.json()["chunks"][0]["context_prefix"])
+        self.assertTrue(found.json()["chunks"][0]["retrieval_sources"])
+        self.assertGreater(found.json()["chunks"][0]["rrf_score"], 0)
 
         isolated = self.client.post(
             "/api/file-libraries/another-chat/search",
@@ -73,7 +103,10 @@ class FileRagApiE2ETest(unittest.TestCase):
 
         after_delete = self.client.post(
             f"/api/file-libraries/{self.chat_id}/search",
-            json={"query": "When is the Aurora release gate?"},
+            json={
+                "query": "When is the Aurora release gate?",
+                "document_ids": [self.document_id],
+            },
         )
         after_delete.raise_for_status()
         self.assertEqual(after_delete.json()["chunks"], [])

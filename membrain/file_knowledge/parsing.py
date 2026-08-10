@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from pathlib import PurePath
 
 import tiktoken
+from markitdown import (
+    FileConversionException,
+    MarkItDown,
+    StreamInfo,
+    UnsupportedFormatException,
+)
 from pypdf import PdfReader
 
 
@@ -35,6 +41,30 @@ class FileTextChunk:
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 _TEXT_EXTENSIONS = {".txt", ".md", ".markdown"}
 _TEXT_MIME_TYPES = {"text/plain", "text/markdown"}
+_MARKITDOWN_EXTENSIONS = {
+    ".docx",
+    ".pptx",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".json",
+    ".html",
+    ".htm",
+}
+_MARKITDOWN_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/excel",
+    "text/csv",
+    "application/csv",
+    "application/json",
+    "text/json",
+    "text/html",
+    "application/xhtml+xml",
+}
+_MARKITDOWN = MarkItDown(enable_plugins=False)
 
 
 def count_tokens(text: str) -> int:
@@ -44,7 +74,7 @@ def count_tokens(text: str) -> int:
 
 
 def parse_file(file_name: str, mime_type: str, content: bytes) -> list[ParsedSection]:
-    """解析 V0 支持的文本或 PDF 文件。
+    """解析 File RAG 白名单内的文本、文档、表格或 PDF 文件。
 
     Args:
         file_name: 用户上传时的原始文件名。
@@ -59,7 +89,7 @@ def parse_file(file_name: str, mime_type: str, content: bytes) -> list[ParsedSec
     """
 
     suffix = PurePath(file_name).suffix.lower()
-    normalized_mime = mime_type.strip().lower()
+    normalized_mime = mime_type.split(";", 1)[0].strip().lower()
     if suffix in _TEXT_EXTENSIONS or normalized_mime in _TEXT_MIME_TYPES:
         try:
             text = content.decode("utf-8-sig")
@@ -88,7 +118,26 @@ def parse_file(file_name: str, mime_type: str, content: bytes) -> list[ParsedSec
             raise FileParsingError("PDF 没有可提取文字，扫描件暂不支持 OCR")
         return sections
 
-    raise FileParsingError("V0 只支持 TXT、Markdown 和文本型 PDF")
+    if suffix in _MARKITDOWN_EXTENSIONS or normalized_mime in _MARKITDOWN_MIME_TYPES:
+        try:
+            result = _MARKITDOWN.convert_stream(
+                io.BytesIO(content),
+                stream_info=StreamInfo(
+                    filename=file_name,
+                    extension=suffix,
+                    mimetype=normalized_mime,
+                ),
+            )
+            text = result.markdown.strip()
+        except (UnsupportedFormatException, FileConversionException) as exc:
+            raise FileParsingError("文件转换为 Markdown 失败") from exc
+        if not text:
+            raise FileParsingError("文件没有可索引文字")
+        return [ParsedSection(text=text)]
+
+    raise FileParsingError(
+        "只支持 TXT、Markdown、JSON、CSV、HTML、DOCX、PPTX、XLSX、XLS 和文本型 PDF"
+    )
 
 
 def split_sections(
