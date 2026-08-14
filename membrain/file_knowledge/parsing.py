@@ -67,6 +67,13 @@ _MARKITDOWN_MIME_TYPES = {
 _MARKITDOWN = MarkItDown(enable_plugins=False)
 
 
+def _clean_extracted_text(text: str) -> str:
+    """清理解析文本中的数据库不支持控制字符。"""
+
+    # PostgreSQL TEXT 不接受 NUL；用空格替换可避免相邻单词被意外拼接。
+    return text.replace("\x00", " ").strip()
+
+
 def count_tokens(text: str) -> int:
     """计算 File RAG 切块和上下文预算使用的 token 数。"""
 
@@ -92,10 +99,9 @@ def parse_file(file_name: str, mime_type: str, content: bytes) -> list[ParsedSec
     normalized_mime = mime_type.split(";", 1)[0].strip().lower()
     if suffix in _TEXT_EXTENSIONS or normalized_mime in _TEXT_MIME_TYPES:
         try:
-            text = content.decode("utf-8-sig")
+            text = _clean_extracted_text(content.decode("utf-8-sig"))
         except UnicodeDecodeError as exc:
             raise FileParsingError("TXT/Markdown 文件必须使用 UTF-8 编码") from exc
-        text = text.strip()
         if not text:
             raise FileParsingError("文件没有可索引文字")
         return [ParsedSection(text=text)]
@@ -108,7 +114,7 @@ def parse_file(file_name: str, mime_type: str, content: bytes) -> list[ParsedSec
             sections = [
                 ParsedSection(text=text, page_number=index + 1)
                 for index, page in enumerate(reader.pages)
-                if (text := (page.extract_text() or "").strip())
+                if (text := _clean_extracted_text(page.extract_text() or ""))
             ]
         except FileParsingError:
             raise
@@ -128,7 +134,7 @@ def parse_file(file_name: str, mime_type: str, content: bytes) -> list[ParsedSec
                     mimetype=normalized_mime,
                 ),
             )
-            text = result.markdown.strip()
+            text = _clean_extracted_text(result.markdown)
         except (UnsupportedFormatException, FileConversionException) as exc:
             raise FileParsingError("文件转换为 Markdown 失败") from exc
         if not text:

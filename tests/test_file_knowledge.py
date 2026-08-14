@@ -267,6 +267,18 @@ class FileParsingTest(unittest.TestCase):
             ],
         )
 
+    def test_parse_pdf_replaces_nul_in_extracted_text(self) -> None:
+        """替换 PDF 文本中的 NUL，避免后续写入 PostgreSQL 失败。"""
+        reader = SimpleNamespace(
+            is_encrypted=False,
+            pages=[SimpleNamespace(extract_text=lambda: "left\x00right")],
+        )
+
+        with patch("membrain.file_knowledge.parsing.PdfReader", return_value=reader):
+            sections = parse_file("report.pdf", "application/pdf", b"pdf")
+
+        self.assertEqual(sections, [ParsedSection(text="left right", page_number=1)])
+
     def test_reject_pdf_without_text(self) -> None:
         """拒绝没有文本层且尚未经过 OCR 的 PDF。"""
         reader = SimpleNamespace(
