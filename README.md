@@ -236,8 +236,8 @@ Content-Type: application/json
 }
 ```
 
-响应包含按相关性排序的 `chunks`，以及 token 预算内可临时注入主模型的
-`packed_context`。删除接口为：
+响应包含按相关性排序的完整候选 `chunks`、token 预算内可临时注入主模型的
+`packed_context`，以及实际进入上下文的 `packed_chunk_count`。删除接口为：
 
 ```http
 DELETE /api/file-libraries/{chat_id}/documents/{document_id}

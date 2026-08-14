@@ -65,6 +65,7 @@ class FileSearchResponse(BaseModel):
     chat_id: str
     packed_context: str
     packed_token_count: int
+    packed_chunk_count: int
     chunks: list[RetrievedFileChunkOut]
     trace: TraceOut
 

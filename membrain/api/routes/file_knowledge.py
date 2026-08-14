@@ -136,6 +136,7 @@ async def search_file_library(
             chat_id=chat_id,
             packed_context=result.packed_context,
             packed_token_count=result.packed_token_count,
+            packed_chunk_count=result.packed_chunk_count,
             chunks=[RetrievedFileChunkOut(**chunk.__dict__) for chunk in result.chunks],
             trace=trace.snapshot(),
         )

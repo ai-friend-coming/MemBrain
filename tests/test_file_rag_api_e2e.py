@@ -86,6 +86,7 @@ class FileRagApiE2ETest(unittest.TestCase):
         )
         self.assertEqual(found.json()["chunks"][0]["document_id"], self.document_id)
         self.assertIn("Friday", found.json()["packed_context"])
+        self.assertGreater(found.json()["packed_chunk_count"], 0)
         self.assertIn("release.txt", found.json()["chunks"][0]["context_prefix"])
         self.assertTrue(found.json()["chunks"][0]["retrieval_sources"])
         self.assertGreater(found.json()["chunks"][0]["rrf_score"], 0)

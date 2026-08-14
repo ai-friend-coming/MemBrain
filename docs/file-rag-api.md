@@ -78,6 +78,7 @@ Content-Type: application/json
 
 - `packed_context`：可直接作为本轮临时模型上下文使用的文件片段。
 - `packed_token_count`：实际拼装 token 数。
+- `packed_chunk_count`：实际进入 `packed_context` 的 chunk 数，不包含被 token 预算裁掉的候选。
 - `chunks`：按 rerank 相关性排序的文档 ID、文件名、chunk 序号、页码、候选来源、各阶段分数、定位上下文和原始正文。
 - `trace`：本次 query Embedding 与 rerank 调用明细。
 
